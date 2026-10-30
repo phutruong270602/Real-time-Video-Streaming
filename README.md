@@ -21,12 +21,16 @@ dotnet build .\WindowsVideoReceiver.sln
 dotnet run --project .\WindowsVideoReceiver\WindowsVideoReceiver.csproj
 ```
 
-Ứng dụng hiện có giao diện Video Display, Streaming Configuration và Performance Monitoring; WebView2 nạp trang receiver nội bộ và nút kiểm tra ping–pong xác nhận cầu nối C# ↔ JavaScript. Nhận video WebRTC, signaling và các điều khiển streaming sẽ được triển khai ở các giai đoạn tiếp theo.
+Ứng dụng hiện có receiver WebRTC trên WebView2, WebSocket signaling server, điều khiển stream theo `CAPABILITIES`, thống kê `getStats()` và quảng bá Bonjour/mDNS `_wvr-signal._tcp`. Các lựa chọn resolution/FPS/camera được lấy từ iPhone; bitrate có thể điều chỉnh trong khoảng 2–30 Mbps.
 
-Để kiểm tra cầu nối, chạy ứng dụng rồi chọn **Test JavaScript ping–pong**; trạng thái bên dưới sẽ xác nhận khi nhận được phản hồi `PONG`.
+Để test stream, chạy app Windows và app sender trên iPhone trong cùng mạng LAN, kết nối iPhone tới địa chỉ WebSocket hiển thị trong cửa sổ (hoặc dùng Bonjour), rồi bấm **Start**. Cần app iPhone gửi `CAPABILITIES`, trả lời SDP và gửi video track WebRTC. Nút **Test JavaScript ping–pong** vẫn dùng để kiểm tra cầu nối WebView2.
 
-## Mạng phát triển
+Nếu video không hiển thị, xem khung **Video diagnostics** trong phần cấu hình: log chỉ rõ signaling, trạng thái WebRTC/ICE, video track, giải mã hay render đang dừng ở bước nào. Log được lưu tại `WindowsVideoReceiver\log\video-diagnostics.log` và cũng xuất hiện trong Debug Output của Visual Studio.
 
-Port signaling: **8080**. iPhone có thể kết nối theo hai cách: tự động tìm Windows Receiver bằng Bonjour/mDNS (Windows công bố dịch vụ, iPhone duyệt tìm), hoặc nhập IP và port của Windows thủ công. Cả hai cách đều kết nối tới cùng WebSocket signaling server trước khi thiết lập WebRTC. Hai thiết bị cần ở cùng mạng LAN; nếu mạng không chuyển tiếp multicast mDNS, dùng nhập IP thủ công.
+## Mạng LAN và firewall
 
-Khi triển khai signaling server, cấu hình Windows Firewall cho WebSocket TCP `8080` và mDNS UDP `5353` trong mạng LAN. Thông tin môi trường hiện tại và IP Windows (chỉ là địa chỉ động để dùng thủ công) được ghi trong [Documents/DevelopmentEnvironment.md](./Documents/DevelopmentEnvironment.md).
+Port signaling: **8080**. iPhone có thể tìm Windows Receiver qua Bonjour/mDNS hoặc nhập địa chỉ `ws://<Windows-IP>:8080`; cả hai cách dùng cùng WebSocket server. mDNS cần multicast hoạt động trên cùng LAN.
+
+Trong cửa sổ receiver, chọn **Configure LAN firewall (UAC)** để thêm quy tắc inbound TCP `8080` và UDP `5353`. Script yêu cầu quyền Administrator, chỉ áp dụng cho profile **Private/Domain** và giới hạn nguồn đến **LocalSubnet**; profile Public không được mở. Nếu Wi-Fi là mạng cá nhân đáng tin cậy, đặt Network profile thành Private trong Windows Settings trước khi cấu hình firewall. Không đổi profile thành Private trên Wi-Fi công cộng hoặc mạng không tin cậy.
+
+Thông tin môi trường hiện tại và IP Windows (địa chỉ động) được ghi trong [Documents/DevelopmentEnvironment.md](./Documents/DevelopmentEnvironment.md). Hai thiết bị phải ở cùng mạng; nếu mạng chặn multicast mDNS, dùng IP thủ công.

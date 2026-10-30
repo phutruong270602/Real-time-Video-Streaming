@@ -5,8 +5,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:views="clr-namespace:WindowsVideoReceiver.Views"
         mc:Ignorable="d"
-        Title="Windows Video Receiver" Height="760" Width="1280"
-        MinHeight="600" MinWidth="1000" Background="#111827">
+        Title="Windows Video Receiver" Height="820" Width="1440"
+        MinHeight="680" MinWidth="1180" Background="#111827">
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
@@ -14,52 +14,114 @@
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="3*" />
-            <ColumnDefinition Width="240" />
-            <ColumnDefinition Width="260" />
+            <ColumnDefinition Width="280" />
+            <ColumnDefinition Width="280" />
         </Grid.ColumnDefinitions>
 
         <views:VideoPlayerView x:Name="VideoPlayer" Grid.Row="0" Grid.Column="0" Margin="0,0,12,12" />
 
         <Border Grid.Row="0" Grid.Column="1" Margin="0,0,12,12" Padding="16"
                 Background="#1F2937" CornerRadius="8">
-            <StackPanel>
-                <TextBlock Text="Streaming Configuration" Foreground="White"
-                           FontSize="17" FontWeight="SemiBold" Margin="0,0,0,24" />
-                <TextBlock Text="Resolution" Foreground="#CBD5E1" />
-                <ComboBox IsEnabled="False" Margin="0,8,0,18">
-                    <ComboBoxItem Content="Waiting for iPhone capabilities" IsSelected="True" />
-                </ComboBox>
-                <TextBlock Text="Frame rate" Foreground="#CBD5E1" />
-                <ComboBox IsEnabled="False" Margin="0,8,0,18">
-                    <ComboBoxItem Content="Waiting for iPhone capabilities" IsSelected="True" />
-                </ComboBox>
-                <TextBlock Text="Bitrate" Foreground="#CBD5E1" />
-                <Slider IsEnabled="False" Minimum="2" Maximum="30" Value="15"
-                        Margin="0,10,0,0" />
-                <TextBlock Text="15 Mbps" Foreground="#94A3B8"
-                           HorizontalAlignment="Right" Margin="0,2,0,20" />
-                <Button Content="Start" IsEnabled="False" Margin="0,0,0,8" />
-                <Button Content="Stop" IsEnabled="False" />
-                <TextBlock Text="Controls become available when signaling is implemented."
-                           Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,16,0,0" />
-            </StackPanel>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="Streaming Configuration" Foreground="White"
+                               FontSize="17" FontWeight="SemiBold" Margin="0,0,0,16" />
+                    <TextBlock Text="Resolution" Foreground="#CBD5E1" />
+                    <ComboBox ItemsSource="{Binding Resolutions}"
+                              SelectedItem="{Binding SelectedResolution, UpdateSourceTrigger=PropertyChanged}"
+                              IsEnabled="{Binding CanConfigure}" Margin="0,6,0,12"
+                              SelectionChanged="ResolutionComboBox_SelectionChanged" />
+                    <TextBlock Text="Frame rate" Foreground="#CBD5E1" />
+                    <ComboBox ItemsSource="{Binding FrameRates}"
+                              SelectedItem="{Binding SelectedFrameRate, UpdateSourceTrigger=PropertyChanged}"
+                              IsEnabled="{Binding CanConfigure}" Margin="0,6,0,12"
+                              SelectionChanged="FrameRateComboBox_SelectionChanged" />
+                    <TextBlock Text="Camera" Foreground="#CBD5E1" />
+                    <ComboBox ItemsSource="{Binding Cameras}"
+                              SelectedItem="{Binding SelectedCamera, UpdateSourceTrigger=PropertyChanged}"
+                              IsEnabled="{Binding CanConfigure}" Margin="0,6,0,12"
+                              SelectionChanged="CameraComboBox_SelectionChanged" />
+                    <TextBlock Text="Target bitrate" Foreground="#CBD5E1" />
+                    <Slider Minimum="2" Maximum="30" Value="{Binding BitrateMbps, UpdateSourceTrigger=PropertyChanged}"
+                            TickFrequency="1" IsSnapToTickEnabled="False"
+                            IsEnabled="{Binding CanConfigure}" Margin="0,8,0,0"
+                            ValueChanged="BitrateSlider_ValueChanged" />
+                    <TextBlock Text="{Binding BitrateLabel}" Foreground="#94A3B8"
+                               HorizontalAlignment="Right" Margin="0,2,0,16" />
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Start" IsEnabled="{Binding CanStart}" MinWidth="100"
+                                Margin="0,0,8,0" Padding="10,6" Click="StartButton_Click" />
+                        <Button Content="Stop" IsEnabled="{Binding CanStop}" MinWidth="100"
+                                Padding="10,6" Click="StopButton_Click" />
+                    </StackPanel>
+
+                    <TextBlock Text="Connection" Foreground="#CBD5E1" FontWeight="SemiBold"
+                               Margin="0,18,0,4" />
+                    <TextBlock Text="{Binding ConnectionStatus}" Foreground="White"
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="Bonjour / mDNS" Foreground="#CBD5E1"
+                               FontWeight="SemiBold" Margin="0,12,0,4" />
+                    <TextBlock Text="{Binding DiscoveryStatus}" Foreground="#94A3B8"
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="Manual WebSocket address" Foreground="#CBD5E1"
+                               FontWeight="SemiBold" Margin="0,12,0,4" />
+                    <TextBlock Text="{Binding ManualAddress}" Foreground="White"
+                               TextWrapping="Wrap" />
+                    <Button Content="Configure LAN firewall (UAC)" Margin="0,12,0,0"
+                            Padding="8,6" Click="ConfigureFirewallButton_Click" />
+                    <TextBlock Text="Firewall rules are limited to LocalSubnet and apply only while Windows Firewall is enabled on a Private/Domain network. Public networks are excluded."
+                               Foreground="#FBBF24" TextWrapping="Wrap" Margin="0,8,0,0" />
+                    <TextBlock Text="{Binding LastError}" Foreground="#FCA5A5"
+                               TextWrapping="Wrap" Margin="0,10,0,0" />
+                    <TextBlock Text="Video diagnostics" Foreground="#CBD5E1"
+                               FontWeight="SemiBold" Margin="0,14,0,4" />
+                    <TextBlock Text="{Binding VideoDiagnosticsLogPath, Mode=OneWay}"
+                               Foreground="#94A3B8" TextWrapping="Wrap" FontSize="10"
+                               Margin="0,0,0,4" />
+                    <TextBox x:Name="VideoDiagnosticsTextBox" Text="{Binding VideoDiagnostics, Mode=OneWay}" IsReadOnly="True"
+                             TextWrapping="Wrap" AcceptsReturn="True" Height="140"
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                             FontFamily="Consolas" FontSize="11" />
+                    <TextBlock Text="Stream controls are populated from the iPhone's CAPABILITIES message."
+                               Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,12,0,0" />
+                </StackPanel>
+            </ScrollViewer>
         </Border>
 
         <Border Grid.Row="0" Grid.Column="2" Padding="16" Background="#1F2937" CornerRadius="8">
-            <StackPanel>
-                <TextBlock Text="Performance Monitoring" Foreground="White"
-                           FontSize="17" FontWeight="SemiBold" Margin="0,0,0,24" />
-                <TextBlock Text="Receive FPS" Foreground="#94A3B8" />
-                <TextBlock Text="--" Foreground="White" FontSize="22" Margin="0,2,0,18" />
-                <TextBlock Text="Bitrate" Foreground="#94A3B8" />
-                <TextBlock Text="--" Foreground="White" FontSize="22" Margin="0,2,0,18" />
-                <TextBlock Text="Packet loss" Foreground="#94A3B8" />
-                <TextBlock Text="--" Foreground="White" FontSize="22" Margin="0,2,0,18" />
-                <TextBlock Text="RTT" Foreground="#94A3B8" />
-                <TextBlock Text="--" Foreground="White" FontSize="22" Margin="0,2,0,18" />
-                <TextBlock Text="Statistics become available when WebRTC is implemented."
-                           Foreground="#94A3B8" TextWrapping="Wrap" />
-            </StackPanel>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="Performance Monitoring" Foreground="White"
+                               FontSize="17" FontWeight="SemiBold" Margin="0,0,0,16" />
+                    <TextBlock Text="Receive FPS" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding ReceiveFps}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="Decode FPS" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding DecodeFps}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="Render FPS" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding RenderFps}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="Capture / Encode FPS (iPhone)" Foreground="#94A3B8" />
+                    <TextBlock Foreground="White" FontSize="18" Margin="0,2,0,10">
+                        <Run Text="{Binding CaptureFps}" /><Run Text=" / " /><Run Text="{Binding EncodeFps}" />
+                    </TextBlock>
+                    <TextBlock Text="Receiver bitrate" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding Bitrate}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="Sender bitrate (iPhone)" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding SenderBitrate}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="Receiver packet loss" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding PacketLoss}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="Sender packet loss (iPhone)" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding SenderPacketLoss}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="Jitter" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding Jitter}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="Receiver RTT" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding RoundTripTime}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="Sender RTT (iPhone)" Foreground="#94A3B8" />
+                    <TextBlock Text="{Binding SenderRoundTripTime}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="Values update from WebRTC getStats() and iPhone STATS messages."
+                               Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,8,0,0" />
+                </StackPanel>
+            </ScrollViewer>
         </Border>
 
         <Border Grid.Row="1" Grid.ColumnSpan="3" Padding="12,8"
@@ -67,7 +129,7 @@
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="Connection:" Foreground="#94A3B8" />
                 <TextBlock Text="{Binding ConnectionStatus}" Foreground="White" Margin="6,0,24,0" />
-                <TextBlock Text="WebView2 bridge:" Foreground="#94A3B8" />
+                <TextBlock Text="WebView2:" Foreground="#94A3B8" />
                 <TextBlock Text="{Binding BridgeStatus}" Foreground="White" Margin="6,0,0,0" />
             </StackPanel>
         </Border>

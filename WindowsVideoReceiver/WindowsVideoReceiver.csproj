@@ -12,10 +12,12 @@
     <Page Remove="App\App.xaml" />
     <ApplicationDefinition Include="App\App.xaml" />
     <None Update="Streaming\receiver.html" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="SetupFirewall.ps1" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+    <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
   </ItemGroup>
 
 </Project>

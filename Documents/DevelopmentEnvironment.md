@@ -16,5 +16,6 @@ Thông tin được ghi nhận khi bắt đầu Giai đoạn 0. IP và trạng t
 | Windows Wi-Fi | `IncepIT-2_5G-1`, 5 GHz, 802.11ax | Connected; iPhone not verified on same network |
 | Windows IPv4 | `192.168.50.236` | Recorded for manual connection; may change |
 | Signaling port | `8080` | Selected; used by both discovery and manual connection |
-| Bonjour/mDNS service | `_wvr-signal._tcp` on `local.` | Planned; advertise from Windows for iPhone discovery |
-| Windows Firewall | WebSocket TCP `8080`; mDNS UDP `5353` | Rules pending until signaling/discovery are implemented |
+| Bonjour/mDNS service | `_wvr-signal._tcp` on `local.` | Advertised by the Windows receiver while it is running |
+| Windows Firewall | WebSocket TCP `8080`; mDNS UDP `5353` | Setup script available; rules are limited to Private/Domain profiles and LocalSubnet; not applied; active Public profile is disabled (Private disabled, Domain enabled) |
+| Current network profile | Wi-Fi `IncepIT-2_5G-1` | Public; do not switch to Private unless this is a trusted network |

@@ -41,7 +41,7 @@ public partial class VideoPlayerView : UserControl
         WebView.CoreWebView2.Navigate(new Uri(pagePath).AbsoluteUri);
     }
 
-    private void SendPing_Click(object sender, RoutedEventArgs e)
+    public void PostMessageToJavaScript(string payload)
     {
         if (WebView.CoreWebView2 is null)
         {
@@ -49,8 +49,28 @@ public partial class VideoPlayerView : UserControl
             return;
         }
 
-        WebView.CoreWebView2.PostWebMessageAsJson("""{"type":"PING"}""");
+        WebView.CoreWebView2.PostWebMessageAsJson(payload);
+    }
+
+    public void StartConnection()
+    {
+        PostMessageToJavaScript("""{"type":"START"}""");
+    }
+
+    public void StopConnection()
+    {
+        PostMessageToJavaScript("""{"type":"STOP"}""");
+    }
+
+    public void SendPing()
+    {
+        PostMessageToJavaScript("""{"type":"PING"}""");
         StatusChanged?.Invoke(this, "Đã gửi PING tới JavaScript");
+    }
+
+    private void SendPing_Click(object sender, RoutedEventArgs e)
+    {
+        SendPing();
     }
 
     private void CoreWebView2_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -58,11 +78,17 @@ public partial class VideoPlayerView : UserControl
         try
         {
             using var message = JsonDocument.Parse(e.WebMessageAsJson);
-            if (message.RootElement.TryGetProperty("type", out var type) &&
+            if (message.RootElement.ValueKind == JsonValueKind.Object &&
+                message.RootElement.TryGetProperty("type", out var type) &&
                 type.ValueKind == JsonValueKind.String &&
                 type.GetString() is { } messageType)
             {
-                MessageReceived?.Invoke(this, messageType);
+                MessageReceived?.Invoke(this, e.WebMessageAsJson);
+                if (messageType == "STATUS" && message.RootElement.TryGetProperty("state", out var state) &&
+                    state.ValueKind == JsonValueKind.String)
+                {
+                    StatusChanged?.Invoke(this, $"Trạng thái signaling: {state.GetString()}");
+                }
             }
             else
             {

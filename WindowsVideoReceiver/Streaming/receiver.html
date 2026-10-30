@@ -15,14 +15,420 @@
   <div id="placeholder">Đang chờ kết nối video từ iPhone</div>
   <script>
     const video = document.getElementById("remote-video");
-    video.addEventListener("playing", () => {
-      document.getElementById("placeholder").hidden = true;
+    const placeholder = document.getElementById("placeholder");
+    let peerConnection = null;
+    let statsTimer = null;
+    let previousInboundStats = null;
+    let renderedFrames = 0;
+    let renderWindowStartedAt = 0;
+    let renderFps = 0;
+    let lastVideoDiagnosis = "";
+    let hasRenderedVideoFrame = false;
+    let hasRemoteVideoTrack = false;
+
+    const postMessage = (payload) => {
+      window.chrome.webview.postMessage(payload);
+    };
+
+    const reportDiagnostic = (stage, message) => {
+      postMessage({ type: "DIAGNOSTIC", stage, message });
+    };
+
+    const setPlaceholder = (message) => {
+      placeholder.textContent = message;
+      placeholder.hidden = false;
+    };
+
+    const diagnoseInboundVideo = (inbound) => {
+      let diagnosis;
+      if (!inbound) {
+        diagnosis = [
+          "No inbound video RTP stats",
+          "Chưa có luồng RTP video; kiểm tra iPhone đã gửi video track và trả lời SDP chưa."
+        ];
+      } else if ((inbound.framesReceived || 0) === 0 && (inbound.packetsReceived || 0) === 0) {
+        diagnosis = [
+          "RTP has no video packets",
+          "Đã có thống kê track nhưng chưa nhận packet/frame video từ iPhone."
+        ];
+      } else if ((inbound.framesDecoded || 0) === 0) {
+        diagnosis = [
+          "Video received but not decoded",
+          `Đã nhận ${inbound.framesReceived || 0} frame nhưng chưa giải mã được frame nào.`
+        ];
+      } else if (!hasRenderedVideoFrame) {
+        diagnosis = [
+          "Decoded frames not rendered",
+          `Đã giải mã ${inbound.framesDecoded} frame nhưng phần tử video chưa render frame.`
+        ];
+      } else {
+        diagnosis = [
+          "Video rendering",
+          `Video đang hiển thị (${renderFps.toFixed(1)} FPS).`
+        ];
+      }
+
+      if (diagnosis[0] !== lastVideoDiagnosis) {
+        lastVideoDiagnosis = diagnosis[0];
+        reportDiagnostic("video-pipeline", diagnosis[1]);
+      }
+    };
+
+    window.addEventListener("error", (event) => {
+      postMessage({
+        type: "ERROR",
+        code: "javascript_error",
+        message: event.message || "Unknown JavaScript error"
+      });
     });
 
-    window.chrome.webview.addEventListener("message", event => {
-      const message = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+    window.addEventListener("unhandledrejection", (event) => {
+      postMessage({
+        type: "ERROR",
+        code: "unhandled_promise",
+        message: event.reason instanceof Error ? event.reason.message : String(event.reason)
+      });
+    });
+
+    const trackRenderedFrames = () => {
+      if (typeof video.requestVideoFrameCallback !== "function") {
+        return;
+      }
+
+      const onFrame = (now) => {
+        renderedFrames++;
+        if (!hasRenderedVideoFrame) {
+          hasRenderedVideoFrame = true;
+          placeholder.hidden = true;
+          reportDiagnostic("video-render", "Phần tử video đã render frame đầu tiên.");
+        }
+        if (renderWindowStartedAt === 0) {
+          renderWindowStartedAt = now;
+        } else if (now - renderWindowStartedAt >= 1000) {
+          renderFps = renderedFrames * 1000 / (now - renderWindowStartedAt);
+          renderedFrames = 0;
+          renderWindowStartedAt = now;
+        }
+
+        video.requestVideoFrameCallback(onFrame);
+      };
+
+      video.requestVideoFrameCallback(onFrame);
+    };
+
+    const stopStatistics = () => {
+      if (statsTimer !== null) {
+        window.clearInterval(statsTimer);
+        statsTimer = null;
+      }
+      previousInboundStats = null;
+    };
+
+    const collectStatistics = async () => {
+      if (!peerConnection) {
+        return;
+      }
+
+      try {
+        const reports = await peerConnection.getStats();
+        const inboundReports = [...reports.values()].filter(report =>
+          report.type === "inbound-rtp" && report.kind === "video" && !report.isRemote);
+        const inbound = inboundReports[0];
+        const candidatePair = [...reports.values()].find(report =>
+          report.type === "candidate-pair" && report.state === "succeeded" && report.nominated);
+
+        if (!inbound) {
+          diagnoseInboundVideo(null);
+          postMessage({ type: "STATS", renderFps });
+          return;
+        }
+
+        diagnoseInboundVideo(inbound);
+        const now = performance.now();
+        const intervalSeconds = previousInboundStats
+          ? (now - previousInboundStats.sampledAt) / 1000
+          : 0;
+        const receiveFps = previousInboundStats && intervalSeconds > 0
+          ? Math.max(0, (inbound.framesReceived - previousInboundStats.framesReceived) / intervalSeconds)
+          : null;
+        const decodeFps = previousInboundStats && intervalSeconds > 0
+          ? Math.max(0, (inbound.framesDecoded - previousInboundStats.framesDecoded) / intervalSeconds)
+          : null;
+        const bitrateBps = previousInboundStats && intervalSeconds > 0
+          ? Math.max(0, (inbound.bytesReceived - previousInboundStats.bytesReceived) * 8 / intervalSeconds)
+          : null;
+        const packetsLost = Math.max(0, inbound.packetsLost || 0);
+        const totalPackets = packetsLost + (inbound.packetsReceived || 0);
+
+        postMessage({
+          type: "STATS",
+          receiveFps,
+          decodeFps,
+          renderFps,
+          bitrateBps,
+          packetLossPercent: totalPackets > 0 ? packetsLost * 100 / totalPackets : null,
+          jitterMs: typeof inbound.jitter === "number" ? inbound.jitter * 1000 : null,
+          rttMs: typeof candidatePair?.currentRoundTripTime === "number"
+            ? candidatePair.currentRoundTripTime * 1000
+            : null
+        });
+
+        previousInboundStats = {
+          sampledAt: now,
+          framesReceived: inbound.framesReceived || 0,
+          framesDecoded: inbound.framesDecoded || 0,
+          bytesReceived: inbound.bytesReceived || 0
+        };
+      } catch (error) {
+        postMessage({
+          type: "ERROR",
+          code: "stats_failed",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    };
+
+    const stopPeerConnection = () => {
+      stopStatistics();
+      if (peerConnection) {
+        reportDiagnostic("webrtc", "Đóng PeerConnection.");
+        peerConnection.close();
+        peerConnection = null;
+      }
+
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+      }
+
+      setPlaceholder("Video đã kết thúc. Chờ Start để nhận lại stream");
+      postMessage({ type: "STATUS", state: "stopped" });
+      renderedFrames = 0;
+      renderWindowStartedAt = 0;
+      renderFps = 0;
+      hasRenderedVideoFrame = false;
+      hasRemoteVideoTrack = false;
+      lastVideoDiagnosis = "";
+    };
+
+    const startPeerConnection = async () => {
+      reportDiagnostic("webrtc", "Bắt đầu tạo PeerConnection nhận video.");
+      if (peerConnection) {
+        peerConnection.close();
+      }
+      stopStatistics();
+      video.srcObject = null;
+      hasRenderedVideoFrame = false;
+      hasRemoteVideoTrack = false;
+      lastVideoDiagnosis = "";
+      setPlaceholder("Đang kết nối với iPhone...");
+
+      peerConnection = new RTCPeerConnection({ iceServers: [] });
+      const currentConnection = peerConnection;
+      currentConnection.addTransceiver("video", { direction: "recvonly" });
+      reportDiagnostic("webrtc", "Đã tạo video transceiver ở chế độ recvonly.");
+
+      currentConnection.ontrack = (event) => {
+        if (peerConnection !== currentConnection) {
+          return;
+        }
+        hasRemoteVideoTrack = event.track.kind === "video";
+        reportDiagnostic(
+          "video-track",
+          `Đã nhận track ${event.track.kind} (readyState=${event.track.readyState}, muted=${event.track.muted}).`
+        );
+        setPlaceholder("Đã nhận track video, đang chờ frame đầu tiên...");
+        event.track.addEventListener("mute", () => {
+          reportDiagnostic("video-track", "Video track đang muted; chưa có dữ liệu video.");
+          setPlaceholder("Video track đang chờ dữ liệu từ iPhone...");
+        });
+        event.track.addEventListener("unmute", () => {
+          reportDiagnostic("video-track", "Video track đã unmute, đang chờ frame hiển thị.");
+        });
+        event.track.addEventListener("ended", () => {
+          reportDiagnostic("video-track", "Video track đã kết thúc.");
+          setPlaceholder("Video track đã kết thúc.");
+        });
+        video.srcObject = event.streams[0] || new MediaStream([event.track]);
+        video.play().then(() => {
+          reportDiagnostic("video-playback", "Lệnh phát video được trình duyệt chấp nhận.");
+        }).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          setPlaceholder(`Không thể phát video: ${message}`);
+          postMessage({ type: "ERROR", code: "video_play_failed", message });
+        });
+      };
+
+      currentConnection.onconnectionstatechange = () => {
+        if (peerConnection === currentConnection) {
+          reportDiagnostic("webrtc", `PeerConnection state: ${currentConnection.connectionState}.`);
+          postMessage({ type: "STATUS", state: currentConnection.connectionState || "connecting" });
+        }
+      };
+
+      currentConnection.oniceconnectionstatechange = () => {
+        if (peerConnection === currentConnection) {
+          reportDiagnostic("ice", `ICE state: ${currentConnection.iceConnectionState}.`);
+        }
+      };
+
+      currentConnection.onicecandidate = (event) => {
+        if (peerConnection === currentConnection && event.candidate) {
+          postMessage({
+            type: "ICE_CANDIDATE",
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex
+          });
+        }
+      };
+
+      try {
+        const offer = await currentConnection.createOffer();
+        await currentConnection.setLocalDescription(offer);
+        if (peerConnection !== currentConnection) {
+          return;
+        }
+
+        reportDiagnostic("signaling", "Đã tạo offer và gửi tới iPhone để thương lượng video.");
+        postMessage({ type: "OFFER", sdp: currentConnection.localDescription.sdp });
+        postMessage({ type: "STATUS", state: "connecting" });
+        window.setTimeout(() => {
+          if (peerConnection === currentConnection && !currentConnection.remoteDescription) {
+            reportDiagnostic("signaling", "Đã gửi offer nhưng chưa nhận ANSWER SDP từ iPhone.");
+          }
+        }, 5000);
+        statsTimer = window.setInterval(() => void collectStatistics(), 1000);
+      } catch (error) {
+        postMessage({
+          type: "ERROR",
+          code: "offer_failed",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    };
+
+    trackRenderedFrames();
+    video.addEventListener("loadedmetadata", () => {
+      reportDiagnostic(
+        "video-element",
+        `Video metadata đã tải (${video.videoWidth}x${video.videoHeight}).`
+      );
+    });
+    video.addEventListener("playing", () => {
+      reportDiagnostic("video-element", "Video element phát; đang xác nhận frame render.");
+      if (typeof video.requestVideoFrameCallback !== "function") {
+        placeholder.hidden = true;
+      }
+    });
+    video.addEventListener("waiting", () => {
+      if (!hasRenderedVideoFrame) {
+        setPlaceholder("Video đang chờ dữ liệu/frame từ iPhone...");
+      }
+      reportDiagnostic("video-element", "Video element đang chờ dữ liệu.");
+    });
+    video.addEventListener("error", () => {
+      const error = video.error;
+      const message = error
+        ? `MediaError code=${error.code}${error.message ? `: ${error.message}` : ""}`
+        : "Lỗi media không có thông tin chi tiết.";
+      setPlaceholder(`Lỗi video: ${message}`);
+      postMessage({ type: "ERROR", code: "video_element_error", message });
+    });
+
+    window.chrome.webview.addEventListener("message", async (event) => {
+      let message;
+      try {
+        message = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      } catch (error) {
+        postMessage({
+          type: "ERROR",
+          code: "invalid_message",
+          message: error instanceof Error ? error.message : String(error)
+        });
+        return;
+      }
+
+      if (!message || !message.type) {
+        return;
+      }
+
       if (message.type === "PING") {
-        window.chrome.webview.postMessage({ type: "PONG" });
+        postMessage({ type: "PONG" });
+        return;
+      }
+
+      if (message.type === "START") {
+        await startPeerConnection();
+        return;
+      }
+
+      if (message.type === "STOP") {
+        stopPeerConnection();
+        return;
+      }
+
+      if (message.type === "ANSWER") {
+        if (!peerConnection) {
+          reportDiagnostic("signaling", "Nhận ANSWER nhưng chưa có PeerConnection; bỏ qua.");
+          return;
+        }
+
+        try {
+          await peerConnection.setRemoteDescription({ type: "answer", sdp: message.sdp });
+          reportDiagnostic("signaling", "Đã áp dụng ANSWER SDP từ iPhone.");
+          const videoSection = String(message.sdp || "")
+            .split(/(?=m=)/)
+            .find(section => section.startsWith("m=video "));
+          const direction = videoSection?.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/m)?.[1] || "sendrecv";
+          if (!videoSection) {
+            reportDiagnostic("signaling", "ANSWER SDP không có media section m=video.");
+          } else if (direction === "recvonly" || direction === "inactive") {
+            reportDiagnostic(
+              "signaling",
+              `ANSWER SDP có video nhưng direction=${direction}; iPhone chưa gửi video về receiver.`
+            );
+          } else {
+            reportDiagnostic("signaling", `ANSWER SDP cho phép gửi video (direction=${direction}).`);
+          }
+          const answeredConnection = peerConnection;
+          window.setTimeout(() => {
+            if (peerConnection === answeredConnection && !hasRemoteVideoTrack) {
+              reportDiagnostic(
+                "video-track",
+                "Đã nhận ANSWER nhưng không phát sinh ontrack; kiểm tra video m-line và sender track trên iPhone."
+              );
+            }
+          }, 3000);
+        } catch (error) {
+          postMessage({
+            type: "ERROR",
+            code: "answer_failed",
+            message: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      if (message.type === "ICE_CANDIDATE") {
+        if (!peerConnection || !message.candidate) {
+          return;
+        }
+
+        try {
+          await peerConnection.addIceCandidate({
+            candidate: message.candidate,
+            sdpMid: message.sdpMid,
+            sdpMLineIndex: message.sdpMLineIndex
+          });
+          reportDiagnostic("ice", "Đã thêm ICE candidate từ iPhone.");
+        } catch (error) {
+          postMessage({
+            type: "ERROR",
+            code: "ice_candidate_failed",
+            message: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
     });
   </script>

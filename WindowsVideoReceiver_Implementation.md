@@ -25,8 +25,8 @@
 
 - [ ] **0.1 Công cụ**
   - [x] Cài Visual Studio Community 2022 (17.14.41)
-  - [ ] Cài workload ".NET desktop development" vào VS 2022 (workload hiện có trong VS 2019, không hỗ trợ target .NET 10)
-  - [x] Cài .NET SDK phù hợp (10.0.403)
+  - [ ] Cài workload ".NET desktop development" vào VS 2022 (đã kiểm tra VS 2022 có sẵn, nhưng workload chưa xác nhận là đã cài/được kích hoạt trong instance hiện tại)
+  - [x] Cài .NET SDK phù hợp (10.0.403 / .NET 10 SDK tương thích với project)
   - [x] Cài Microsoft Edge WebView2 Runtime (156.0.4314.50)
   - [x] Cài Git
   - [ ] Cài Wireshark
@@ -37,18 +37,18 @@
   - [x] Xác định tần số quét màn hình: 240 Hz (2560 × 1600, theo dxdiag)
   - [x] Windows đang kết nối Wi-Fi 5 GHz (802.11ax)
   - [ ] Xác nhận iPhone cùng mạng Wi-Fi 5/6 GHz với Windows
-- [ ] **0.3 Tạo repository và solution**
+- [x] **0.3 Tạo repository và solution**
   - [x] Khởi tạo Git repo, tạo `README.md`, `Documents/`
   - [x] Tạo solution `WindowsVideoReceiver.sln` (WPF, .NET 10)
   - [x] Tạo cấu trúc thư mục theo mục 4.1 của tài liệu thiết kế
 - [ ] **0.4 Cấu hình mạng**
   - [x] Chọn port WebSocket (8080)
-  - [ ] Mở port trong Windows Firewall (chờ signaling server được triển khai)
+  - [ ] Áp dụng quy tắc Windows Firewall (script đã có; cần UAC, profile Private/Domain và kiểm thử trên LAN)
   - [x] Ghi lại IP của máy Windows để dùng khi kết nối thủ công (địa chỉ động; xem `Documents/DevelopmentEnvironment.md`)
 
 **Điều kiện hoàn thành:** [x] solution build và chạy được cửa sổ WPF trống (đã kiểm tra).
 
-**Trạng thái hiện tại:** Giai đoạn 0 chưa hoàn tất. Còn workload .NET desktop cho VS 2022, Wireshark, VLC, xác nhận iPhone cùng Wi-Fi và quy tắc Firewall (chỉ tạo sau khi có signaling server).
+**Trạng thái hiện tại:** Giai đoạn 0 chưa hoàn tất. Đã xác nhận VS 2022, .NET SDK, WebView2, Git và FFmpeg; còn workload .NET desktop trong VS 2022, Wireshark, VLC, xác nhận iPhone cùng Wi-Fi và quy tắc Firewall chưa hoàn tất.
 
 ---
 
@@ -79,22 +79,22 @@
 ## Giai đoạn 2 – Signaling Server
 
 - [ ] **2.1 Bonjour/mDNS service discovery**
-  - [ ] Công bố DNS-SD service type `_wvr-signal._tcp` trên domain `local.`, port WebSocket `8080`
-  - [ ] Chỉ công bố khi WebSocket server đang lắng nghe; gỡ công bố khi server dừng
-  - [ ] Mở/kiểm tra Windows Firewall cho WebSocket TCP `8080` và mDNS UDP `5353` trên mạng LAN
+  - [x] Công bố DNS-SD service type `_wvr-signal._tcp` trên domain `local.`, port WebSocket `8080`
+  - [x] Chỉ công bố sau khi WebSocket server bắt đầu; gỡ công bố khi ứng dụng dừng server
+  - [ ] Mở/kiểm tra Windows Firewall cho WebSocket TCP `8080` và mDNS UDP `5353` trên mạng LAN (script giới hạn Private/Domain + LocalSubnet; áp dụng cần Administrator)
   - [ ] Xác nhận service có thể được duyệt từ iPhone cùng mạng Wi-Fi
-- [ ] **2.2 WebSocket server**
-  - [ ] Cài `SignalingServer.cs` lắng nghe trên port đã chọn
-  - [ ] Chấp nhận kết nối từ iPhone, xử lý ngắt kết nối/kết nối lại
-  - [ ] Chỉ cho một iPhone kết nối tại một thời điểm (PoC)
-- [ ] **2.3 Định tuyến message**
-  - [ ] Tạo model C# cho message theo Interface Contract (mục 6 tài liệu thiết kế)
-  - [ ] Dispatcher theo `type`
-  - [ ] Chuyển `ANSWER`, `ICE_CANDIDATE` từ iPhone sang JS
-  - [ ] Chuyển `OFFER`, `ICE_CANDIDATE` từ JS sang iPhone
+- [x] **2.2 WebSocket server**
+  - [x] Cài `SignalingServer.cs` lắng nghe trên port đã chọn
+  - [x] Chấp nhận kết nối từ iPhone, xử lý ngắt kết nối/kết nối lại
+  - [x] Chỉ cho một iPhone kết nối tại một thời điểm (PoC)
+- [x] **2.3 Định tuyến message**
+  - [x] Tạo model C# cho message theo Interface Contract (mục 6 tài liệu thiết kế)
+  - [x] Dispatcher theo `type`
+  - [x] Chuyển `ANSWER`, `ICE_CANDIDATE` từ iPhone sang JS
+  - [x] Chuyển `OFFER`, `ICE_CANDIDATE` từ JS sang iPhone
 - [ ] **2.4 Trạng thái kết nối**
-  - [ ] Hiển thị: chờ kết nối / đã kết nối / lỗi
-  - [ ] Hiển thị trạng thái công bố dịch vụ và địa chỉ IP:port để kết nối thủ công
+  - [x] Hiển thị: chờ kết nối / đã kết nối / lỗi
+  - [x] Hiển thị trạng thái công bố dịch vụ và địa chỉ IP:port để kết nối thủ công
 - [ ] **2.5 Test độc lập**
   - [ ] Test server bằng một WebSocket client bất kỳ (trình duyệt hoặc công cụ test)
 
@@ -104,28 +104,28 @@
 
 ## Giai đoạn 3 – WebRTC Receiver (MVP)
 
-- [ ] **3.1 Receiver bằng JavaScript**
-  - [ ] Cài `WebRTCClient.js` và `PeerConnectionManager.js`
-  - [ ] Tạo `RTCPeerConnection` (cấu hình ICE cho LAN, không cần STUN/TURN)
-  - [ ] Thêm transceiver video ở chế độ `recvonly`
-- [ ] **3.2 Offer/Answer**
-  - [ ] Tạo SDP Offer, gửi qua cầu nối C# → iPhone
-  - [ ] Nhận Answer, gọi `setRemoteDescription`
-  - [ ] Trao đổi ICE candidate hai chiều
+- [x] **3.1 Receiver bằng JavaScript**
+  - [x] Cài `WebRTCClient.js` và `PeerConnectionManager.js` (cơ chế được tích hợp trực tiếp vào `receiver.html` để giảm file phụ)
+  - [x] Tạo `RTCPeerConnection` (cấu hình ICE cho LAN, không cần STUN/TURN)
+  - [x] Thêm transceiver video ở chế độ `recvonly`
+- [x] **3.2 Offer/Answer**
+  - [x] Tạo SDP Offer, gửi qua cầu nối C# → iPhone
+  - [x] Nhận Answer, gọi `setRemoteDescription`
+  - [x] Trao đổi ICE candidate hai chiều
 - [ ] **3.3 Ưu tiên H.264**
   - [ ] Dùng `setCodecPreferences` đặt H.264 lên đầu
   - [ ] Kiểm tra SDP Answer xác nhận H.264
 - [ ] **3.4 Hiển thị video**
-  - [ ] Gắn `track` nhận được vào thẻ `<video>`
-  - [ ] Hiển thị resolution và trạng thái kết nối
+  - [x] Gắn `track` nhận được vào thẻ `<video>`
+  - [x] Hiển thị trạng thái kết nối
 - [ ] **3.5 Start / Stop**
-  - [ ] Nút Start: bắt đầu phiên kết nối, gửi `START`
-  - [ ] Nút Stop: gửi `STOP`, đóng PeerConnection, dọn dẹp
-  - [ ] Cho phép Start lại nhiều lần không cần khởi động lại app
+  - [x] Nút Start: bắt đầu phiên kết nối, gửi `START`
+  - [x] Nút Stop: gửi `STOP`, đóng PeerConnection, dọn dẹp
+  - [x] Cho phép Start lại nhiều lần không cần khởi động lại app
 - [ ] **3.6 Hiển thị số liệu cơ bản (MVP)**
-  - [ ] FPS thực tế
-  - [ ] Bitrate thực tế
-  - [ ] Connection status
+  - [x] FPS thực tế
+  - [x] Bitrate thực tế
+  - [x] Connection status
 - [ ] **3.7 Test end-to-end**
   - [ ] Test với app iPhone Sender thật
   - [ ] Xác nhận video hiển thị liên tục ít nhất 5 phút
@@ -137,17 +137,17 @@
 ## Giai đoạn 4 – Giao diện điều khiển
 
 - [ ] **4.1 Nhận khả năng của iPhone**
-  - [ ] Xử lý `CAPABILITIES`, điền dữ liệu cho các ComboBox
-  - [ ] Ẩn/vô hiệu hóa lựa chọn không được hỗ trợ (ví dụ 120 FPS)
+  - [x] Xử lý `CAPABILITIES`, điền dữ liệu cho các ComboBox
+  - [x] Ẩn/vô hiệu hóa lựa chọn không được hỗ trợ (ví dụ 120 FPS)
 - [ ] **4.2 Các điều khiển**
-  - [ ] Resolution ComboBox → `SET_RESOLUTION`
-  - [ ] FPS ComboBox → `SET_FPS`
-  - [ ] Camera ComboBox → `SET_CAMERA`
-  - [ ] Bitrate Slider (2–30 Mbps, mặc định 15) → `SET_BITRATE`
-  - [ ] Debounce Slider 200–300 ms trước khi gửi lệnh
+  - [x] Resolution ComboBox → `SET_RESOLUTION`
+  - [x] FPS ComboBox → `SET_FPS`
+  - [x] Camera ComboBox → `SET_CAMERA`
+  - [x] Bitrate Slider (2–30 Mbps, mặc định 15) → `SET_BITRATE`
+  - [x] Debounce Slider 250 ms trước khi gửi lệnh
 - [ ] **4.3 Hiển thị cấu hình hiện tại**
-  - [ ] Xử lý `CONFIG_APPLIED` và cập nhật UI
-  - [ ] Xử lý `ERROR`, hiển thị thông báo lỗi
+  - [x] Xử lý `CONFIG_APPLIED` và cập nhật UI
+  - [x] Xử lý `ERROR`, hiển thị thông báo lỗi
 - [ ] **4.4 Full screen**
   - [ ] Chế độ toàn màn hình cho khu vực video
   - [ ] Thoát bằng phím Esc
@@ -162,19 +162,19 @@
 ## Giai đoạn 5 – Performance Monitoring
 
 - [ ] **5.1 Thu thập từ `getStats()`**
-  - [ ] Gọi định kỳ (ví dụ mỗi 1 giây) trong JS, gửi về C#
-  - [ ] Receive FPS (`framesReceived`)
-  - [ ] Decode FPS (`framesDecoded`)
-  - [ ] Bitrate (`bytesReceived`)
-  - [ ] Packet Loss (`packetsLost`)
-  - [ ] Jitter (`jitter`, `jitterBufferDelay`)
-  - [ ] RTT (`currentRoundTripTime`)
+  - [x] Gọi định kỳ mỗi 1 giây trong JS, gửi về C#
+  - [x] Receive FPS (`framesReceived`)
+  - [x] Decode FPS (`framesDecoded`)
+  - [x] Bitrate (`bytesReceived`)
+  - [x] Packet Loss (`packetsLost`)
+  - [x] Jitter (`jitter`)
+  - [x] RTT (`currentRoundTripTime`)
 - [ ] **5.2 Render FPS**
-  - [ ] Đo bằng `requestVideoFrameCallback` trên thẻ `<video>`
+  - [x] Đo bằng `requestVideoFrameCallback` trên thẻ `<video>`
 - [ ] **5.3 Số liệu từ iPhone**
-  - [ ] Nhận `STATS`: Capture FPS, Encode FPS
+  - [x] Nhận `STATS`: Capture FPS, Encode FPS
 - [ ] **5.4 Hiển thị trên UI**
-  - [ ] Bảng Performance Monitoring đủ các chỉ số theo mục 4.2.C tài liệu thiết kế
+  - [x] Bảng Performance Monitoring hiển thị các chỉ số nhận được
   - [ ] Đổi màu cảnh báo khi packet loss/RTT vượt ngưỡng
 - [ ] **5.5 Đo độ trễ end-to-end**
   - [ ] Chọn phương pháp đo (ví dụ chụp đồng hồ trên màn hình đối chiếu, hoặc nhúng timestamp)
