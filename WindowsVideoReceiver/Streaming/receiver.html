@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Windows Video Receiver</title>
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; background: #020617; color: #cbd5e1; font: 14px sans-serif; }
+    video { width: 100%; height: 100%; object-fit: contain; }
+    #placeholder { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <video id="remote-video" autoplay muted playsinline></video>
+  <div id="placeholder">Đang chờ kết nối video từ iPhone</div>
+  <script>
+    const video = document.getElementById("remote-video");
+    video.addEventListener("playing", () => {
+      document.getElementById("placeholder").hidden = true;
+    });
+
+    window.chrome.webview.addEventListener("message", event => {
+      const message = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      if (message.type === "PING") {
+        window.chrome.webview.postMessage({ type: "PONG" });
+      }
+    });
+  </script>
+</body>
+</html>
