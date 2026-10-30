@@ -6,6 +6,21 @@
 - [WindowsVideoReceiver_Implementation.md](./WindowsVideoReceiver_Implementation.md)
 - [Tổng quan hệ thống](./overview.md)
 
+## iPhone Video Sender
+
+Ứng dụng SwiftUI nằm trong [iOS/iPhoneVideoSender](./iOS/iPhoneVideoSender). Mở [project Xcode](./iOS/iPhoneVideoSender/iPhoneVideoSender.xcodeproj) để chạy trên iPhone. Ứng dụng hiện có camera preview/cấu hình capture, Bonjour và kết nối WebSocket thủ công, WebRTC sender H.264, Start/Stop, điều khiển từ Windows và thống kê sender. Theo dõi các bước kiểm thử thiết bị thật trong [iPhoneVideoSender_Implementation.md](./iPhoneVideoSender_Implementation.md).
+
+Xcode cần tải WebRTC iOS SDK **M156** qua Swift Package Manager ở lần build đầu. Có thể build cho simulator bằng:
+
+```sh
+xcodebuild -project iOS/iPhoneVideoSender/iPhoneVideoSender.xcodeproj \
+  -scheme iPhoneVideoSender \
+  -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
+```
+
+Để chạy trên iPhone thật, chọn Team và provisioning profile trong Xcode; mở ứng dụng sẽ xin quyền Camera và Local Network.
+
 ## Yêu cầu
 
 - .NET 10 SDK

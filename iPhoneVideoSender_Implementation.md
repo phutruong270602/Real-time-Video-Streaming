@@ -33,76 +33,85 @@
   - [ ] Tạo cấu trúc thư mục theo mục 9 của tài liệu thiết kế
   - [ ] Tạo `README.md`, thư mục `Documents/`
 - [ ] **0.3 Tạo Xcode project**
-  - [ ] Project SwiftUI, tên `iPhoneVideoSender`
+  - [x] Tạo project SwiftUI, tên `iPhoneVideoSender`
+  - [x] Build bằng Swift Package WebRTC M156 và mở app trên iPhone 17 Simulator
   - [ ] Cấu hình Signing & Capabilities, chạy được "Hello World" trên iPhone thật
-  - [ ] Thêm `NSCameraUsageDescription` vào Info.plist
-  - [ ] Thêm `NSLocalNetworkUsageDescription` (cần cho kết nối mạng LAN trên iOS)
-  - [ ] Thêm `_wvr-signal._tcp` vào `NSBonjourServices` để duyệt dịch vụ Bonjour của Windows
-- [ ] **0.4 Tạo cấu trúc module**
-  - [ ] Tạo các nhóm `App/`, `Camera/`, `Streaming/`, `Network/`, `Configuration/`, `Monitoring/`
-  - [ ] Tạo các file rỗng theo mục 4.1 của tài liệu thiết kế
+  - [x] Thêm `NSCameraUsageDescription` vào Info.plist
+  - [x] Thêm `NSLocalNetworkUsageDescription` (cần cho kết nối mạng LAN trên iOS)
+  - [x] Thêm `_wvr-signal._tcp` vào `NSBonjourServices` để duyệt dịch vụ Bonjour của Windows
+  - [x] Ghi log ra Xcode/device console và `Documents/iPhoneVideoSender.log`; bật chia sẻ file để lưu log từ iPhone
+- [x] **0.4 Tạo cấu trúc module**
+  - [x] Tạo các nhóm `App/`, `Camera/`, `Streaming/`, `Network/`, `Configuration/`, `Monitoring/`
+  - [x] Tạo các file module; camera, signaling, streaming và monitoring đã có implementation ban đầu
 
-**Điều kiện hoàn thành:** app rỗng chạy được trên iPhone thật.
+**Điều kiện hoàn thành:** project đã build cho iOS Simulator; còn cấu hình signing và chạy kiểm chứng trên iPhone thật.
+
+### Xem và lưu log trên iPhone
+
+- Trong app, cuộn xuống cuối trang và mở **Application logs** để xem tối đa 60 log gần nhất; danh sách tự cập nhật khi đang mở. Version/build hiển thị ngay đầu trang.
+- Khi chạy app từ Xcode trên iPhone, xem log trong **Debug console**; log cũng có thể xem trong ứng dụng **Console** trên macOS bằng cách chọn iPhone.
+- File `iPhoneVideoSender.log` được ghi trong thư mục Documents của ứng dụng. Trên iPhone, mở **Files → On My iPhone → iPhoneVideoSender** để xem hoặc chia sẻ file.
+- Ứng dụng ghi log khởi động, camera, Bonjour, WebSocket, signaling và trạng thái WebRTC. Không ghi từng frame, số liệu thống kê định kỳ hoặc nội dung SDP/ICE để tránh làm file tăng nhanh và lưu dữ liệu mạng không cần thiết.
 
 ---
 
 ## Giai đoạn 1 – Camera Application
 
-- [ ] **1.1 Xin quyền camera**
-  - [ ] Hiển thị yêu cầu quyền khi mở app
-  - [ ] Xử lý trường hợp người dùng từ chối (hiện hướng dẫn mở Settings)
+- [x] **1.1 Xin quyền camera**
+  - [x] Hiển thị yêu cầu quyền khi mở app
+  - [x] Xử lý trường hợp người dùng từ chối và mở Settings
 - [ ] **1.2 Liệt kê camera format**
-  - [ ] Viết `CameraManager` liệt kê `AVCaptureDevice.Format` của camera trước/sau
-  - [ ] Ghi log resolution, `videoSupportedFrameRateRanges`, pixel format
-  - [ ] Xác định thiết bị có hỗ trợ 1080p120 hay không
+  - [x] Viết `CameraManager` liệt kê `AVCaptureDevice.Format` của camera trước/sau
+  - [x] Ghi log resolution, `videoSupportedFrameRateRanges`, pixel format
+  - [x] Xác định khả năng 1080p120 theo format thiết bị
   - [ ] Lưu kết quả vào file/ghi chú (dùng cho mục tiêu 120 FPS và `CAPABILITIES`)
-- [ ] **1.3 Capture camera**
-  - [ ] Cấu hình `AVCaptureSession`
-  - [ ] Thêm `AVCaptureVideoDataOutput`, nhận từng frame
-  - [ ] Hiển thị preview trên SwiftUI
-- [ ] **1.4 Chọn thông số**
-  - [ ] Chọn resolution (720p / 1080p)
-  - [ ] Chọn FPS (30 / 60 / 120, chỉ cho chọn giá trị được hỗ trợ)
-  - [ ] Chọn camera trước/sau
-  - [ ] Áp dụng format bằng `activeFormat` và `activeVideoMinFrameDuration`/`MaxFrameDuration`
-- [ ] **1.5 Đo Capture FPS**
-  - [ ] Đếm frame/giây trong callback và hiển thị lên UI
-  - [ ] Ghi nhận timestamp từng frame
+- [x] **1.3 Capture camera**
+  - [x] Cấu hình `AVCaptureSession`
+  - [x] Thêm `AVCaptureVideoDataOutput`, nhận từng frame
+  - [x] Hiển thị preview trên SwiftUI
+- [x] **1.4 Chọn thông số**
+  - [x] Chọn resolution (720p / 1080p)
+  - [x] Chọn FPS (30 / 60 / 120, chỉ cho chọn giá trị được hỗ trợ)
+  - [x] Chọn camera trước/sau
+  - [x] Áp dụng format bằng `activeFormat` và `activeVideoMinFrameDuration`/`MaxFrameDuration`
+- [x] **1.5 Đo Capture FPS**
+  - [x] Đếm frame/giây trong callback và hiển thị lên UI
+  - [x] Ghi nhận timestamp từng frame để hiển thị/chuyển tiếp WebRTC
 
-**Điều kiện hoàn thành:** thấy preview ổn định ở 1080p60; biết chắc máy có hỗ trợ 1080p120 hay không.
+**Điều kiện hoàn thành:** implementation đã có; cần xác nhận preview/FPS/format thực tế trên iPhone.
 
 ---
 
 ## Giai đoạn 2 – WebRTC Sender (MVP 1080p60)
 
-- [ ] **2.1 Tích hợp WebRTC iOS SDK**
-  - [ ] Chọn nguồn SDK (Swift Package hoặc framework build sẵn) và ghi lại phiên bản
-  - [ ] Thêm vào project, build thành công
-- [ ] **2.2 Tạo PeerConnection**
-  - [ ] Tạo `RTCPeerConnectionFactory` với video encoder/decoder factory hỗ trợ H.264 hardware
-  - [ ] Tạo `RTCPeerConnection` với cấu hình ICE cho LAN (không cần STUN/TURN)
-  - [ ] Cài đặt delegate xử lý ICE candidate và trạng thái kết nối
-- [ ] **2.3 Tạo video track**
-  - [ ] Tạo `RTCVideoSource`, `RTCVideoTrack`
-  - [ ] Đẩy frame từ `AVCaptureVideoDataOutput` vào video source (capturer tùy biến để kiểm soát FPS/resolution)
-  - [ ] Thêm track vào PeerConnection ở chế độ send-only
+- [x] **2.1 Tích hợp WebRTC iOS SDK**
+  - [x] Chọn Swift Package `stasel/WebRTC` phiên bản M156
+  - [x] Thêm vào project; build simulator thành công với package M156
+- [x] **2.2 Tạo PeerConnection**
+  - [x] Tạo `RTCPeerConnectionFactory` với H.264 encoder factory
+  - [x] Tạo `RTCPeerConnection` cho LAN, không STUN/TURN
+  - [x] Xử lý ICE candidate và trạng thái kết nối bằng delegate
+- [x] **2.3 Tạo video track**
+  - [x] Tạo `RTCVideoSource`, `RTCVideoTrack`
+  - [x] Chuyển frame từ `AVCaptureVideoDataOutput` sang WebRTC, cấu hình output format theo độ phân giải/FPS đã chọn
+  - [x] Thêm video track vào PeerConnection
 - [ ] **2.4 Cấu hình H.264**
-  - [ ] Ưu tiên H.264 trong danh sách codec
-  - [ ] Kiểm tra SDP Answer có chọn H.264
-  - [ ] Đặt bitrate ban đầu 15 Mbps
-- [ ] **2.5 Signaling client**
-  - [ ] Cài Bonjour/mDNS browser duyệt DNS-SD service type `_wvr-signal._tcp` trên domain `local.` do Windows công bố
-  - [ ] Hiển thị các Windows Receiver tìm thấy và cho phép người dùng chọn một thiết bị
-  - [ ] Cài `WebSocketManager` kết nối tới `ws://<Windows host>:<port>` sau khi chọn dịch vụ
-  - [ ] Cung cấp lựa chọn nhập IP/port thủ công (mặc định port `8080`) nếu không dùng được discovery
-  - [ ] Đảm bảo cả hai cách đều dùng cùng WebSocket signaling server và luồng WebRTC
-  - [ ] Xử lý `OFFER` → tạo `ANSWER`
-  - [ ] Trao đổi `ICE_CANDIDATE` hai chiều
-  - [ ] Gửi/nhận `STATUS`
-- [ ] **2.6 Start / Stop streaming**
-  - [ ] Nút Start/Stop trên UI
-  - [ ] Xử lý lệnh `START` / `STOP` từ Windows
-  - [ ] Dọn dẹp tài nguyên khi stop (đóng PeerConnection, dừng capture)
+  - [x] Dùng H.264 encoder factory
+  - [ ] Xác nhận SDP Answer thực tế đã chọn H.264 với receiver
+  - [x] Đặt bitrate ban đầu 15 Mbps
+- [x] **2.5 Signaling client**
+  - [x] Duyệt Bonjour DNS-SD `_wvr-signal._tcp` trên `local.`
+  - [x] Hiển thị receiver tìm thấy để người dùng chọn
+  - [x] Kết nối WebSocket tới host/port của receiver
+  - [x] Hỗ trợ nhập IP/port thủ công (mặc định `8080`)
+  - [x] Dùng cùng signaling/WebRTC flow cho hai cách kết nối
+  - [x] Xử lý `OFFER` → tạo và gửi `ANSWER`
+  - [x] Trao đổi `ICE_CANDIDATE` hai chiều
+  - [x] Gửi trạng thái kết nối
+- [x] **2.6 Start / Stop streaming**
+  - [x] Nút Start/Stop trên UI
+  - [x] Xử lý lệnh `START` / `STOP` từ Windows
+  - [x] Đóng PeerConnection và dừng capture khi Stop
 - [ ] **2.7 Test với receiver mẫu**
   - [ ] Test với trang WebRTC receiver đơn giản trên trình duyệt hoặc app Windows (nếu đã có)
   - [ ] Xác nhận video hiển thị phía nhận
@@ -113,21 +122,21 @@
 
 ## Giai đoạn 3 – Điều khiển từ Windows
 
-- [ ] **3.1 Định nghĩa message theo Interface Contract**
-  - [ ] Tạo model Swift cho các message (mục 6 tài liệu thiết kế)
-  - [ ] Viết parser JSON và dispatcher theo `type`
-- [ ] **3.2 Báo cáo trạng thái về Windows**
-  - [ ] Gửi `CAPABILITIES` ngay sau khi kết nối
-  - [ ] Gửi `CONFIG_APPLIED` sau mỗi lần đổi cấu hình
-  - [ ] Gửi `ERROR` khi lệnh không áp dụng được
-- [ ] **3.3 Áp dụng lệnh điều khiển**
-  - [ ] `SET_BITRATE` (clamp trong khoảng 2–30 Mbps)
-  - [ ] `SET_FPS`
-  - [ ] `SET_RESOLUTION`
-  - [ ] `SET_CAMERA`
-- [ ] **3.4 Thống kê phía iPhone**
-  - [ ] Cài `StreamingStatistics` đọc từ `RTCStatisticsReport`
-  - [ ] Gửi `STATS` định kỳ (ví dụ mỗi 1 giây): Capture FPS, Encode FPS, bitrate, packet loss, RTT
+- [x] **3.1 Định nghĩa message theo Interface Contract**
+  - [x] Tạo model Swift cho các message (mục 6 tài liệu thiết kế)
+  - [x] Parse JSON và dispatch theo `type`
+- [x] **3.2 Báo cáo trạng thái về Windows**
+  - [x] Gửi `CAPABILITIES` ngay sau khi kết nối
+  - [x] Gửi `CONFIG_APPLIED` sau khi đổi cấu hình
+  - [x] Gửi `ERROR` khi lệnh không áp dụng được
+- [x] **3.3 Áp dụng lệnh điều khiển**
+  - [x] `SET_BITRATE` (clamp trong khoảng 2–30 Mbps)
+  - [x] `SET_FPS`
+  - [x] `SET_RESOLUTION`
+  - [x] `SET_CAMERA`
+- [x] **3.4 Thống kê phía iPhone**
+  - [x] Cài `StreamingStatistics` đọc từ `RTCStatisticsReport`
+  - [x] Gửi `STATS` định kỳ (1 giây): Capture FPS, Encode FPS, bitrate, packet loss, RTT
 - [ ] **3.5 Test điều khiển**
   - [ ] Đổi từng thông số từ Windows, xác nhận phía iPhone áp dụng đúng
   - [ ] Xác nhận stream không bị đứt khi đổi bitrate
