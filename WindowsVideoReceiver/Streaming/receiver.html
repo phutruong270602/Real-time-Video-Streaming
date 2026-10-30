@@ -249,10 +249,17 @@
           reportDiagnostic("video-track", "Video track đã kết thúc.");
           setPlaceholder("Video track đã kết thúc.");
         });
-        video.srcObject = event.streams[0] || new MediaStream([event.track]);
+        const mediaStream = event.streams[0] || new MediaStream([event.track]);
+        video.srcObject = mediaStream;
         video.play().then(() => {
-          reportDiagnostic("video-playback", "Lệnh phát video được trình duyệt chấp nhận.");
+          if (peerConnection === currentConnection && video.srcObject === mediaStream) {
+            reportDiagnostic("video-playback", "Lệnh phát video được trình duyệt chấp nhận.");
+          }
         }).catch((error) => {
+          if (peerConnection !== currentConnection || video.srcObject !== mediaStream ||
+              error?.name === "AbortError") {
+            return;
+          }
           const message = error instanceof Error ? error.message : String(error);
           setPlaceholder(`Không thể phát video: ${message}`);
           postMessage({ type: "ERROR", code: "video_play_failed", message });

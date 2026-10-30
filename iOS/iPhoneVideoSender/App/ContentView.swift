@@ -29,6 +29,7 @@ struct ContentView: View {
                     cameraStatus
                     cameraControls
                     captureStatistics
+                    senderStatistics
                     connectionControls
                     streamingControls
                     logsPanel
@@ -225,6 +226,25 @@ struct ContentView: View {
             statistic(title: "Capture", value: String(format: "%.0f FPS", camera.captureFPS))
             statistic(title: "Resolution", value: camera.selectedResolution.rawValue)
             statistic(title: "Last frame", value: camera.lastFrameTimestamp ?? "--")
+        }
+    }
+
+    private var senderStatistics: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("WebRTC sender")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                statistic(
+                    title: "Encode",
+                    value: String(format: "%.1f FPS", webRTC.statistics.encodeFPS)
+                )
+                statistic(
+                    title: "Sent bitrate",
+                    value: String(format: "%.1f Mbps", Double(webRTC.statistics.bitrate) / 1_000_000)
+                )
+                statistic(title: "Packets lost", value: "\(webRTC.statistics.packetsLost)")
+            }
         }
     }
 

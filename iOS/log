@@ -1,0 +1,129 @@
+Reading from public effective user settings.
+1 192x144, pixel format 0x34323076, fps 1-60
+1 192x144, pixel format 0x34323066, fps 1-60
+1 352x288, pixel format 0x34323076, fps 1-60
+1 352x288, pixel format 0x34323066, fps 1-60
+1 480x360, pixel format 0x34323076, fps 1-60
+1 480x360, pixel format 0x34323066, fps 1-60
+1 640x480, pixel format 0x34323076, fps 1-60
+1 640x480, pixel format 0x34323066, fps 1-60
+1 640x480, pixel format 0x34323076, fps 1-60
+1 640x480, pixel format 0x34323066, fps 1-60
+1 960x540, pixel format 0x34323076, fps 1-60
+1 960x540, pixel format 0x34323066, fps 1-60
+1 1024x768, pixel format 0x34323076, fps 1-60
+1 1024x768, pixel format 0x34323066, fps 1-60
+1 1280x720, pixel format 0x34323076, fps 1-30
+1 1280x720, pixel format 0x34323066, fps 1-30
+1 1280x720, pixel format 0x34323076, fps 1-60
+1 1280x720, pixel format 0x34323066, fps 1-60
+1 1280x720, pixel format 0x34323076, fps 1-60
+1 1280x720, pixel format 0x34323066, fps 1-60
+1 1280x720, pixel format 0x34323076, fps 1-240
+1 1280x720, pixel format 0x34323066, fps 1-240
+1 1440x1080, pixel format 0x34323076, fps 1-60
+1 1440x1080, pixel format 0x34323066, fps 1-60
+1 1920x1080, pixel format 0x34323076, fps 1-30
+1 1920x1080, pixel format 0x34323066, fps 1-30
+1 1920x1080, pixel format 0x34323076, fps 1-60
+1 1920x1080, pixel format 0x34323066, fps 1-60
+1 1920x1080, pixel format 0x34323076, fps 1-60
+1 1920x1080, pixel format 0x34323066, fps 1-60
+1 1920x1080, pixel format 0x34323076, fps 1-120
+1 1920x1080, pixel format 0x34323066, fps 1-120
+1 1920x1080, pixel format 0x34323076, fps 1-240
+1 1920x1080, pixel format 0x34323066, fps 1-240
+1 1920x1440, pixel format 0x34323076, fps 1-30
+1 1920x1440, pixel format 0x34323066, fps 1-30
+1 1920x1440, pixel format 0x34323076, fps 1-60
+1 1920x1440, pixel format 0x34323066, fps 1-60
+1 2592x1944, pixel format 0x34323076, fps 1-30
+1 2592x1944, pixel format 0x34323066, fps 1-30
+1 3264x2448, pixel format 0x34323076, fps 1-30
+1 3264x2448, pixel format 0x34323066, fps 1-30
+1 3840x2160, pixel format 0x34323076, fps 1-30
+1 3840x2160, pixel format 0x34323066, fps 1-30
+1 3840x2160, pixel format 0x34323076, fps 1-60
+1 3840x2160, pixel format 0x34323066, fps 1-60
+1 4032x3024, pixel format 0x34323076, fps 1-30
+1 4032x3024, pixel format 0x34323066, fps 1-30
+2 192x144, pixel format 0x34323076, fps 1-60
+2 192x144, pixel format 0x34323066, fps 1-60
+2 352x288, pixel format 0x34323076, fps 1-60
+2 352x288, pixel format 0x34323066, fps 1-60
+2 480x360, pixel format 0x34323076, fps 1-60
+2 480x360, pixel format 0x34323066, fps 1-60
+2 640x480, pixel format 0x34323076, fps 1-60
+2 640x480, pixel format 0x34323066, fps 1-60
+2 640x480, pixel format 0x34323076, fps 1-60
+2 640x480, pixel format 0x34323066, fps 1-60
+2 960x540, pixel format 0x34323076, fps 1-30
+2 960x540, pixel format 0x34323066, fps 1-30
+2 1024x768, pixel format 0x34323076, fps 1-60
+2 1024x768, pixel format 0x34323066, fps 1-60
+2 1280x720, pixel format 0x34323076, fps 1-30
+2 1280x720, pixel format 0x34323066, fps 1-30
+2 1280x720, pixel format 0x34323076, fps 1-60
+2 1280x720, pixel format 0x34323066, fps 1-60
+2 1280x720, pixel format 0x34323076, fps 1-60
+2 1280x720, pixel format 0x34323066, fps 1-60
+2 1280x720, pixel format 0x34323076, fps 1-120
+2 1280x720, pixel format 0x34323066, fps 1-120
+2 1440x1080, pixel format 0x34323076, fps 1-60
+2 1440x1080, pixel format 0x34323066, fps 1-60
+2 1920x1080, pixel format 0x34323076, fps 1-30
+2 1920x1080, pixel format 0x34323066, fps 1-30
+2 1920x1080, pixel format 0x34323076, fps 1-60
+2 1920x1080, pixel format 0x34323066, fps 1-60
+2 1920x1080, pixel format 0x34323076, fps 1-60
+2 1920x1080, pixel format 0x34323066, fps 1-60
+2 1920x1080, pixel format 0x34323076, fps 1-120
+2 1920x1080, pixel format 0x34323066, fps 1-120
+2 1920x1440, pixel format 0x34323076, fps 1-30
+2 1920x1440, pixel format 0x34323066, fps 1-30
+2 1920x1440, pixel format 0x34323076, fps 1-60
+2 1920x1440, pixel format 0x34323066, fps 1-60
+2 3088x2316, pixel format 0x34323076, fps 1-30
+2 3088x2316, pixel format 0x34323066, fps 1-30
+2 3840x2160, pixel format 0x34323076, fps 1-30
+2 3840x2160, pixel format 0x34323066, fps 1-30
+2 3840x2160, pixel format 0x34323076, fps 1-60
+2 3840x2160, pixel format 0x34323066, fps 1-60
+2 4032x3024, pixel format 0x34323076, fps 1-30
+2 4032x3024, pixel format 0x34323066, fps 1-30
+<<<< FigXPCUtilities >>>> signalled err=-17281 at <>:308
+<<<< FigCaptureSourceRemote >>>> Fig assert: "err == 0 " at bail (FigCaptureSourceRemote.m:569) - (err=-17281)
+<<<< FigXPCUtilities >>>> signalled err=-17281 at <>:308
+<<<< FigCaptureSourceRemote >>>> Fig assert: "err == 0 " at bail (FigCaptureSourceRemote.m:569) - (err=-17281)
+Camera started: back, 1920 × 1080, 60 FPS
+Searching for Windows receivers with Bonjour
+Found Bonjour service: TRUONGNGOCPHU
+Resolved receiver TRUONGNGOCPHU on port 8080
+Connecting to signaling server
+tcp_input [C1.1.1:2] flags=[R.] seq=0, ack=584092509, win=0 state=SYN_SENT rcv_nxt=0, snd_una=584092508
+nw_endpoint_flow_failed_with_error [C1.1.1 fe80::9991:94bc:3223:d396%en0.8080 in_progress channel-flow (satisfied (Path is satisfied), viable, interface: en0[802.11], scoped, ipv4, dns, uses wifi, LQM: good)] already failing, returning
+Signaling WebSocket connected
+Starting video stream
+Starting camera
+Preparing WebRTC video stream
+WebRTC peer connection prepared at 1920 × 1080, 60 FPS
+Received signaling message: start
+Starting video stream
+Received signaling message: offer
+Received signaling message: status
+WebRTC answer created
+Sending WebRTC answer
+Received signaling message: status
+WebRTC ICE connection established
+Received signaling message: status
+Received signaling message: setBitrate
+Received signaling message: setBitrate
+Received signaling message: stop
+WebRTC ICE connection disconnected
+Stopping video stream
+Received signaling message: status
+Received signaling message: error
+<<<< FigXPCUtilities >>>> signalled err=-17281 at <>:308
+<<<< FigCaptureSourceRemote >>>> Fig assert: "err == 0 " at bail (FigCaptureSourceRemote.m:569) - (err=-17281)
+Disconnecting from signaling server
+tcp_input [C1.1.2:2] flags=[R.] seq=955419278, ack=2058544372, win=0 state=FIN_WAIT_2 rcv_nxt=955419278, snd_una=2058544372
