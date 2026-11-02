@@ -167,6 +167,10 @@
           decodeFps,
           renderFps,
           bitrateBps,
+          packetsReceived: inbound.packetsReceived || 0,
+          bytesReceived: inbound.bytesReceived || 0,
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
           packetLossPercent: totalPackets > 0 ? packetsLost * 100 / totalPackets : null,
           jitterMs: typeof inbound.jitter === "number" ? inbound.jitter * 1000 : null,
           rttMs: typeof candidatePair?.currentRoundTripTime === "number"

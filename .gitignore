@@ -7,8 +7,7 @@ TestResults/
 cacsh
 **/xcuserdata/
 *.xcuserstate
-<<<<<<< Updated upstream
-WindowsVideoReceiver/log/*.log
-=======
-/iOS/log
->>>>>>> Stashed changes
+/Window/OptitrackRtspReceiver-RTSP/log/
+/Window/WindowsVideoReceiver/log/
+/iOS/iPhoneVideoSender/log/
+/iOS/iPhoneVideoSender-RTSP/log/

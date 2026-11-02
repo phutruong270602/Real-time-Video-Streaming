@@ -2,15 +2,16 @@
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-    echo "Usage: bash iOS/capture-app-logs.sh <iPhone name or UDID>" >&2
+    echo "Usage: bash $(basename "$0") <iPhone name or UDID>" >&2
     exit 2
 fi
 
 device="$1"
-bundle_id="com.example.iPhoneVideoSender"
+bundle_id="com.example.iPhoneVideoSender.rtsp"
 source_path="Documents/iPhoneVideoSender.log"
 script_dir="$(cd "$(dirname "$0")" && pwd)"
-output_file="$script_dir/log"
+output_dir="$script_dir/log"
+output_file="$output_dir/capture-app-logs.log"
 temp_dir="$(mktemp -d)"
 snapshot="$temp_dir/app.log"
 error_file="$temp_dir/devicectl-error.log"
@@ -24,9 +25,10 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-printf '\n--- App log capture started: %s | device: %s ---\n' \
+mkdir -p "$output_dir"
+printf '\n--- RTSP app log capture started: %s | device: %s ---\n' \
     "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$device" >> "$output_file"
-echo "Appending app logs to $output_file. Press Ctrl-C to stop."
+echo "Appending RTSP app logs to $output_file. Press Ctrl-C to stop."
 
 while true; do
     rm -f "$snapshot" "$error_file"
@@ -50,12 +52,12 @@ while true; do
             fi
         fi
         if [[ "$reported_unavailable" == true ]]; then
-            echo "Connected to app log on $device."
+            echo "Connected to RTSP app log on $device."
             reported_unavailable=false
         fi
     else
         if [[ "$reported_unavailable" == false ]]; then
-            echo "Waiting for app log on $device:" >&2
+            echo "Waiting for RTSP app log on $device:" >&2
             cat "$error_file" >&2
             reported_unavailable=true
         fi

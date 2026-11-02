@@ -1,54 +1,39 @@
-# Windows Video Receiver
+# Real-time Video Streaming
 
-Ứng dụng WPF nhận video từ iPhone qua WebRTC trên mạng LAN. Tài liệu thiết kế và checklist triển khai:
+Repository gồm hai cặp ứng dụng gửi/nhận video độc lập qua WebRTC hoặc RTSP.
+Xem thêm [tổng quan hệ thống](./overview.md).
 
-- [WindowsVideoReceiver_Design.md](./WindowsVideoReceiver_Design.md)
-- [WindowsVideoReceiver_Implementation.md](./WindowsVideoReceiver_Implementation.md)
-- [Tổng quan hệ thống](./overview.md)
+## WebRTC
 
-## iPhone Video Sender
+- Windows receiver: [README](./Window/WindowsVideoReceiver/README.md), [thiết kế](./Window/WindowsVideoReceiver/WindowsVideoReceiver_Design.md), [quy trình triển khai](./Window/WindowsVideoReceiver/WindowsVideoReceiver_Implementation.md).
+- iPhone sender: [README](./iOS/iPhoneVideoSender/README.md).
 
-Ứng dụng SwiftUI nằm trong [iOS/iPhoneVideoSender](./iOS/iPhoneVideoSender). Mở [project Xcode](./iOS/iPhoneVideoSender/iPhoneVideoSender.xcodeproj) để chạy trên iPhone. Ứng dụng hiện có camera preview/cấu hình capture, Bonjour và kết nối WebSocket thủ công, WebRTC sender H.264, Start/Stop, điều khiển từ Windows và thống kê sender. Theo dõi các bước kiểm thử thiết bị thật trong [iPhoneVideoSender_Implementation.md](./iPhoneVideoSender_Implementation.md).
+Windows receiver mở WebSocket signaling trên cổng `8080`; chạy ứng dụng này
+trước, sau đó kết nối iPhone sender từ cùng mạng LAN.
 
-Xcode cần tải WebRTC iOS SDK **M156** qua Swift Package Manager ở lần build đầu. Có thể build cho simulator bằng:
-
-```sh
-xcodebuild -project iOS/iPhoneVideoSender/iPhoneVideoSender.xcodeproj \
-  -scheme iPhoneVideoSender \
-  -destination 'generic/platform=iOS Simulator' \
-  CODE_SIGNING_ALLOWED=NO build
-```
-
-Để chạy trên iPhone thật, chọn Team và provisioning profile trong Xcode; mở ứng dụng sẽ xin quyền Camera và Local Network.
-
-## Yêu cầu
-
-- .NET 10 SDK
-- Microsoft Edge WebView2 Runtime
-- Visual Studio với workload **.NET desktop development** nếu phát triển bằng Visual Studio
-
-## Build và chạy
-
-Từ thư mục gốc:
+Từ PowerShell tại thư mục gốc repository, build và chạy Windows receiver:
 
 ```powershell
-dotnet build .\WindowsVideoReceiver.sln
-dotnet run --project .\WindowsVideoReceiver\WindowsVideoReceiver.csproj
+dotnet build .\Window\WindowsVideoReceiver\WindowsVideoReceiver.csproj
+dotnet run --project .\Window\WindowsVideoReceiver\WindowsVideoReceiver.csproj
 ```
 
-Ứng dụng hiện có receiver WebRTC trên WebView2, WebSocket signaling server, điều khiển stream theo `CAPABILITIES`, thống kê `getStats()` và quảng bá Bonjour/mDNS `_wvr-signal._tcp`. Các lựa chọn resolution/FPS/camera được lấy từ iPhone; bitrate có thể điều chỉnh trong khoảng 2–30 Mbps.
+Yêu cầu: .NET 10 SDK và Microsoft Edge WebView2 Runtime.
 
-Để test stream, chạy app Windows và app sender trên iPhone trong cùng mạng LAN, kết nối iPhone tới địa chỉ WebSocket hiển thị trong cửa sổ (hoặc dùng Bonjour), rồi bấm **Start**. Cần app iPhone gửi `CAPABILITIES`, trả lời SDP và gửi video track WebRTC. Nút **Test JavaScript ping–pong** vẫn dùng để kiểm tra cầu nối WebView2.
+## RTSP
 
-Nếu video không hiển thị, xem khung **Video diagnostics** trong phần cấu hình: log chỉ rõ signaling, trạng thái WebRTC/ICE, video track, giải mã hay render đang dừng ở bước nào. Log được lưu tại `WindowsVideoReceiver\log\video-diagnostics.log` và cũng xuất hiện trong Debug Output của Visual Studio. Cấu hình và thống kê nhận được được ghi bằng tiếng Anh vào `WindowsVideoReceiver\log\received-statistics.log`; thống kê từ receiver và iPhone được ghi tối đa mỗi 5 giây.
+- Windows receiver: [README](./Window/OptitrackRtspReceiver-RTSP/README.md).
+- iPhone sender: [README](./iOS/iPhoneVideoSender-RTSP/README.md).
 
-## Mạng LAN và firewall
+Từ PowerShell tại thư mục gốc repository, chạy Windows RTSP receiver:
 
-Port signaling: **8080**. iPhone có thể tìm Windows Receiver qua Bonjour/mDNS hoặc nhập địa chỉ `ws://<Windows-IP>:8080`; cả hai cách dùng cùng WebSocket server. mDNS cần multicast hoạt động trên cùng LAN.
+```powershell
+dotnet run --project .\Window\OptitrackRtspReceiver-RTSP\WindowsRtspReceiver\WindowsRtspReceiver.csproj -c Release
+```
 
-Trong cửa sổ receiver, chọn **Configure LAN firewall (UAC)** để thêm quy tắc inbound TCP `8080` và UDP `5353`. Script yêu cầu quyền Administrator, chỉ áp dụng cho profile **Private/Domain** và giới hạn nguồn đến **LocalSubnet**; profile Public không được mở. Nếu Wi-Fi là mạng cá nhân đáng tin cậy, đặt Network profile thành Private trong Windows Settings trước khi cấu hình firewall. Không đổi profile thành Private trên Wi-Fi công cộng hoặc mạng không tin cậy.
+Ứng dụng RTSP cần CMake 3.21+, Visual Studio C++ build tools và FFmpeg SDK
+x64. Nếu FFmpeg SDK không nằm ở đường dẫn mặc định của project, truyền thêm
+`-p:FFmpegRoot="D:\path\to\ffmpeg-sdk"` như hướng dẫn trong README của receiver.
 
-Thông tin môi trường hiện tại và IP Windows (địa chỉ động) được ghi trong [Documents/DevelopmentEnvironment.md](./Documents/DevelopmentEnvironment.md). Hai thiết bị phải ở cùng mạng; nếu mạng chặn multicast mDNS, dùng IP thủ công.
-
-
-#bash iOS/capture-app-logs.sh "iPhone"
+Xcode cần được cài trên macOS để build/run các ứng dụng iOS. Các ứng dụng iPhone
+cần quyền Camera và Local Network; hai thiết bị phải ở cùng mạng LAN.
