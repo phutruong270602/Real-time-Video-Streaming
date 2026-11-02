@@ -31,11 +31,14 @@
                               SelectedItem="{Binding SelectedResolution, UpdateSourceTrigger=PropertyChanged}"
                               IsEnabled="{Binding CanConfigure}" Margin="0,6,0,12"
                               SelectionChanged="ResolutionComboBox_SelectionChanged" />
-                    <TextBlock Text="Frame rate" Foreground="#CBD5E1" />
+                    <TextBlock Text="Target frame rate" Foreground="#CBD5E1" />
                     <ComboBox ItemsSource="{Binding FrameRates}"
                               SelectedItem="{Binding SelectedFrameRate, UpdateSourceTrigger=PropertyChanged}"
+                              ItemStringFormat="{}{0} FPS"
                               IsEnabled="{Binding CanConfigure}" Margin="0,6,0,12"
                               SelectionChanged="FrameRateComboBox_SelectionChanged" />
+                    <TextBlock Text="Available rates depend on the selected resolution and camera."
+                               Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,-6,0,12" />
                     <TextBlock Text="Camera" Foreground="#CBD5E1" />
                     <ComboBox ItemsSource="{Binding Cameras}"
                               SelectedItem="{Binding SelectedCamera, UpdateSourceTrigger=PropertyChanged}"

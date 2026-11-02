@@ -18,8 +18,12 @@ public partial class MainWindow : Window
 {
     private readonly StreamingControlViewModel _viewModel = new();
     private readonly SignalingServer _signalingServer = SignalingServer.Instance;
+    private readonly Dictionary<(ResolutionOption Resolution, string Camera), HashSet<int>> _frameRatesByMode = new();
     private BonjourServiceAdvertiser? _bonjourAdvertiser;
     private CancellationTokenSource? _bitrateDebounce;
+    private ResolutionOption? _appliedResolution;
+    private string? _appliedCamera;
+    private int? _appliedFrameRate;
     private bool _updatingControls;
 
     public MainWindow()
@@ -226,6 +230,7 @@ public partial class MainWindow : Window
         _updatingControls = true;
         try
         {
+            _frameRatesByMode.Clear();
             _viewModel.Resolutions.Clear();
             if (root.TryGetProperty("resolutions", out var resolutions) &&
                 resolutions.ValueKind == JsonValueKind.Array)
@@ -233,22 +238,46 @@ public partial class MainWindow : Window
                 foreach (var item in resolutions.EnumerateArray())
                 {
                     var resolution = ParseResolution(item);
-                    if (resolution is not null && !_viewModel.Resolutions.Contains(resolution))
+                    if (resolution is null)
+                    {
+                        continue;
+                    }
+
+                    if (!_viewModel.Resolutions.Contains(resolution))
                     {
                         _viewModel.Resolutions.Add(resolution);
                     }
-                }
-            }
 
-            _viewModel.FrameRates.Clear();
-            if (TryGetArray(root, "fps", "frameRates", out var frameRates))
-            {
-                foreach (var item in frameRates.EnumerateArray())
-                {
-                    if (TryGetNumber(item, out var value) && value is > 0 and <= 240 &&
-                        !_viewModel.FrameRates.Contains((int)value))
+                    var rates = new HashSet<int>();
+                    if (TryGetArray(item, "fps", "frameRates", out var supportedRates))
                     {
-                        _viewModel.FrameRates.Add((int)value);
+                        foreach (var rate in supportedRates.EnumerateArray())
+                        {
+                            if (TryGetNumber(rate, out var value) &&
+                                value is > 0 and <= 240 &&
+                                value == Math.Truncate(value))
+                            {
+                                rates.Add((int)value);
+                            }
+                        }
+                    }
+
+                    var modeCameras = new List<string>();
+                    if (TryGetArray(item, "cameras", "camera", out var camerasForMode))
+                    {
+                        foreach (var camera in camerasForMode.EnumerateArray())
+                        {
+                            if (camera.ValueKind == JsonValueKind.String &&
+                                !string.IsNullOrWhiteSpace(camera.GetString()))
+                            {
+                                modeCameras.Add(camera.GetString()!);
+                            }
+                        }
+                    }
+
+                    foreach (var modeCamera in modeCameras)
+                    {
+                        AddFrameRates(resolution, modeCamera, rates);
                     }
                 }
             }
@@ -273,13 +302,35 @@ public partial class MainWindow : Window
                 }
             }
 
+            if (_frameRatesByMode.Count == 0 &&
+                TryGetArray(root, "fps", "frameRates", out var legacyFrameRates))
+            {
+                var rates = legacyFrameRates.EnumerateArray()
+                    .Where(item => TryGetNumber(item, out var value) &&
+                        value is > 0 and <= 240 &&
+                        value == Math.Truncate(value))
+                    .Select(item =>
+                    {
+                        TryGetNumber(item, out var value);
+                        return (int)value;
+                    })
+                    .ToHashSet();
+                foreach (var resolution in _viewModel.Resolutions)
+                {
+                    foreach (var camera in _viewModel.Cameras)
+                    {
+                        AddFrameRates(resolution, camera, rates);
+                    }
+                }
+            }
+
             _viewModel.SelectedResolution ??= _viewModel.Resolutions.FirstOrDefault();
-            _viewModel.SelectedFrameRate ??= _viewModel.FrameRates.FirstOrDefault();
             if (string.IsNullOrEmpty(_viewModel.SelectedCamera))
             {
                 _viewModel.SelectedCamera = _viewModel.Cameras.FirstOrDefault() ?? string.Empty;
             }
 
+            RefreshFrameRates(_viewModel.SelectedFrameRate);
             _viewModel.HasCapabilities = true;
             _viewModel.LastError = string.Empty;
         }
@@ -304,6 +355,16 @@ public partial class MainWindow : Window
                 }
             }
 
+            if (TryGetString(root, "camera", out var camera) &&
+                _viewModel.Cameras.Contains(camera, StringComparer.OrdinalIgnoreCase))
+            {
+                _viewModel.SelectedCamera = camera;
+            }
+
+            RefreshFrameRates(TryGetNumber(root, "fps", out var currentFps)
+                ? (int)currentFps
+                : _viewModel.SelectedFrameRate);
+
             if (TryGetNumber(root, "fps", out var fps))
             {
                 var frameRate = (int)fps;
@@ -318,11 +379,9 @@ public partial class MainWindow : Window
                 _viewModel.BitrateMbps = Math.Clamp(bitrate / 1_000_000, 2, 30);
             }
 
-            if (TryGetString(root, "camera", out var camera) &&
-                _viewModel.Cameras.Contains(camera, StringComparer.OrdinalIgnoreCase))
-            {
-                _viewModel.SelectedCamera = camera;
-            }
+            _appliedResolution = _viewModel.SelectedResolution;
+            _appliedCamera = _viewModel.SelectedCamera;
+            _appliedFrameRate = _viewModel.SelectedFrameRate;
 
             _viewModel.LogReceivedConfiguration(
                 _viewModel.SelectedCamera,
@@ -415,12 +474,16 @@ public partial class MainWindow : Window
         _updatingControls = true;
         try
         {
+            _frameRatesByMode.Clear();
             _viewModel.Resolutions.Clear();
             _viewModel.FrameRates.Clear();
             _viewModel.Cameras.Clear();
             _viewModel.SelectedResolution = null;
             _viewModel.SelectedFrameRate = null;
             _viewModel.SelectedCamera = string.Empty;
+            _appliedResolution = null;
+            _appliedCamera = null;
+            _appliedFrameRate = null;
             _viewModel.HasCapabilities = false;
         }
         finally
@@ -456,6 +519,79 @@ public partial class MainWindow : Window
                 _viewModel.ResetStatistics();
             }
         }
+    }
+
+    private void AddFrameRates(
+        ResolutionOption resolution,
+        string camera,
+        IEnumerable<int> frameRates)
+    {
+        var key = _frameRatesByMode.Keys.FirstOrDefault(candidate =>
+            candidate.Resolution == resolution &&
+            candidate.Camera.Equals(camera, StringComparison.OrdinalIgnoreCase));
+        if (key == default)
+        {
+            key = (resolution, camera);
+            _frameRatesByMode[key] = [];
+        }
+
+        _frameRatesByMode[key].UnionWith(frameRates);
+    }
+
+    private HashSet<int> GetFrameRates(ResolutionOption? resolution, string? camera)
+    {
+        if (resolution is null || string.IsNullOrWhiteSpace(camera))
+        {
+            return [];
+        }
+
+        return _frameRatesByMode
+            .Where(entry =>
+                entry.Key.Resolution == resolution &&
+                entry.Key.Camera.Equals(camera, StringComparison.OrdinalIgnoreCase))
+            .Select(entry => entry.Value)
+            .FirstOrDefault() ?? [];
+    }
+
+    private void RefreshFrameRates(int? preferredFrameRate)
+    {
+        var availableRates = GetFrameRates(_viewModel.SelectedResolution, _viewModel.SelectedCamera)
+            .Order()
+            .ToArray();
+
+        _viewModel.FrameRates.Clear();
+        foreach (var frameRate in availableRates)
+        {
+            _viewModel.FrameRates.Add(frameRate);
+        }
+
+        if (availableRates.Length == 0)
+        {
+            _viewModel.SelectedFrameRate = null;
+            return;
+        }
+
+        if (preferredFrameRate is { } preferred && availableRates.Contains(preferred))
+        {
+            _viewModel.SelectedFrameRate = preferred;
+            return;
+        }
+
+        var oldRates = GetFrameRates(_appliedResolution, _appliedCamera);
+        var transitionRates = availableRates.Intersect(oldRates).ToArray();
+        var selectedRate = transitionRates.Contains(60)
+            ? 60
+            : transitionRates.Contains(30)
+                ? 30
+                : transitionRates.OrderDescending().FirstOrDefault();
+        if (selectedRate == 0)
+        {
+            selectedRate = availableRates.Contains(60)
+                ? 60
+                : availableRates[^1];
+        }
+
+        _viewModel.SelectedFrameRate = selectedRate;
     }
 
     private static ResolutionOption? ParseResolution(JsonElement item)
@@ -629,15 +765,40 @@ public partial class MainWindow : Window
 
     private async void ResolutionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_updatingControls && _viewModel.CanConfigure &&
-            _viewModel.SelectedResolution is { } resolution)
+        if (_updatingControls || !_viewModel.CanConfigure ||
+            _viewModel.SelectedResolution is not { } resolution)
         {
-            await SendControlMessageAsync(new
-            {
-                type = "SET_RESOLUTION",
-                width = resolution.Width,
-                height = resolution.Height
-            });
+            return;
+        }
+
+        var oldRates = GetFrameRates(_appliedResolution, _appliedCamera);
+        _updatingControls = true;
+        try
+        {
+            RefreshFrameRates(_appliedFrameRate);
+        }
+        finally
+        {
+            _updatingControls = false;
+        }
+
+        var frameRate = _viewModel.SelectedFrameRate;
+        var setFrameRateFirst = frameRate is not null && oldRates.Contains(frameRate.Value);
+        if (setFrameRateFirst && frameRate != _appliedFrameRate)
+        {
+            await SendControlMessageAsync(new { type = "SET_FPS", value = frameRate });
+        }
+
+        await SendControlMessageAsync(new
+        {
+            type = "SET_RESOLUTION",
+            width = resolution.Width,
+            height = resolution.Height
+        });
+
+        if (!setFrameRateFirst && frameRate != _appliedFrameRate && frameRate is not null)
+        {
+            await SendControlMessageAsync(new { type = "SET_FPS", value = frameRate });
         }
     }
 
@@ -652,14 +813,39 @@ public partial class MainWindow : Window
 
     private async void CameraComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_updatingControls && _viewModel.CanConfigure &&
-            !string.IsNullOrWhiteSpace(_viewModel.SelectedCamera))
+        if (_updatingControls || !_viewModel.CanConfigure ||
+            string.IsNullOrWhiteSpace(_viewModel.SelectedCamera))
         {
-            await SendControlMessageAsync(new
-            {
-                type = "SET_CAMERA",
-                value = _viewModel.SelectedCamera
-            });
+            return;
+        }
+
+        var oldRates = GetFrameRates(_appliedResolution, _appliedCamera);
+        _updatingControls = true;
+        try
+        {
+            RefreshFrameRates(_appliedFrameRate);
+        }
+        finally
+        {
+            _updatingControls = false;
+        }
+
+        var frameRate = _viewModel.SelectedFrameRate;
+        var setFrameRateFirst = frameRate is not null && oldRates.Contains(frameRate.Value);
+        if (setFrameRateFirst && frameRate != _appliedFrameRate)
+        {
+            await SendControlMessageAsync(new { type = "SET_FPS", value = frameRate });
+        }
+
+        await SendControlMessageAsync(new
+        {
+            type = "SET_CAMERA",
+            value = _viewModel.SelectedCamera
+        });
+
+        if (!setFrameRateFirst && frameRate != _appliedFrameRate && frameRate is not null)
+        {
+            await SendControlMessageAsync(new { type = "SET_FPS", value = frameRate });
         }
     }
 

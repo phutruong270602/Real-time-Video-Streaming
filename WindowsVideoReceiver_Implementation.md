@@ -139,6 +139,7 @@
 - [ ] **4.1 Nhận khả năng của iPhone**
   - [x] Xử lý `CAPABILITIES`, điền dữ liệu cho các ComboBox
   - [x] Ẩn/vô hiệu hóa lựa chọn không được hỗ trợ (ví dụ 120 FPS)
+  - [x] Lọc FPS theo độ phân giải và camera từ từng mode trong `CAPABILITIES`
 - [ ] **4.2 Các điều khiển**
   - [x] Resolution ComboBox → `SET_RESOLUTION`
   - [x] FPS ComboBox → `SET_FPS`
