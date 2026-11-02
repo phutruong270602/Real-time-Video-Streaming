@@ -38,7 +38,7 @@ final class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
     private var hasRemoteDescription = false
     private var pendingRemoteCandidates: [RemoteIceCandidate] = []
     private var bitrate = StreamingConfiguration.defaultBitrate
-    private var frameRate = 60
+    private var frameRate = StreamingConfiguration.defaultFrameRate
 
     var isPrepared: Bool { peerConnection != nil }
 

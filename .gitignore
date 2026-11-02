@@ -7,4 +7,8 @@ TestResults/
 cacsh
 **/xcuserdata/
 *.xcuserstate
+<<<<<<< Updated upstream
 WindowsVideoReceiver/log/*.log
+=======
+/iOS/log
+>>>>>>> Stashed changes

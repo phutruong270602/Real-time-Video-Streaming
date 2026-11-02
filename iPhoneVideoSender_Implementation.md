@@ -71,7 +71,7 @@
   - [x] Hiển thị preview trên SwiftUI
 - [x] **1.4 Chọn thông số**
   - [x] Chọn resolution (720p / 1080p)
-  - [x] Chọn FPS (30 / 60 / 120, chỉ cho chọn giá trị được hỗ trợ)
+  - [x] Chọn FPS (30 / 60 / 120 / 150 / 200 / 240, chỉ cho chọn giá trị được hỗ trợ)
   - [x] Chọn camera trước/sau
   - [x] Áp dụng format bằng `activeFormat` và `activeVideoMinFrameDuration`/`MaxFrameDuration`
 - [x] **1.5 Đo Capture FPS**

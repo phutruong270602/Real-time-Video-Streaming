@@ -20,7 +20,7 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     HStack {
-                        Text("Version \(appVersion) (\(buildNumber))")
+                        Text("Version \(appVersion)")
                         Spacer()
                     }
                     .font(.caption)
@@ -128,10 +128,6 @@ struct ContentView: View {
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.2"
-    }
-
-    private var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
     }
 
     private var logsPanel: some View {
@@ -272,10 +268,20 @@ struct ContentView: View {
                 Text("Windows receiver")
                     .font(.headline)
                 Spacer()
-                Text(signaling.state.title)
+                Button {
+                    discovery.reloadSearching()
+                } label: {
+                    Label("Reload", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            HStack {
+                Text("Connection: \(signaling.state.title)")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(signaling.state == .connected ? .green : .secondary)
                     .lineLimit(1)
+                Spacer()
             }
 
             if !discovery.receivers.isEmpty {

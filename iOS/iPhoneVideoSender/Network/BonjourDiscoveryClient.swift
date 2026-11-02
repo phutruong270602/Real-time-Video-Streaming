@@ -35,10 +35,19 @@ final class BonjourDiscoveryClient: NSObject, ObservableObject, NetServiceDelega
         browser.searchForServices(ofType: "_wvr-signal._tcp.", inDomain: "local.")
     }
 
+    func reloadSearching() {
+        stopSearching()
+        receivers.removeAll()
+        startSearching()
+    }
+
     func stopSearching() {
         AppLogger.info("Stopped Bonjour receiver search", category: "Bonjour")
         browser.stop()
-        services.values.forEach { $0.stop() }
+        services.values.forEach {
+            $0.delegate = nil
+            $0.stop()
+        }
         services.removeAll()
     }
 

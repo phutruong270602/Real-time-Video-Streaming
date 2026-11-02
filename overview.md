@@ -228,7 +228,7 @@ Sử dụng AVFoundation để capture camera.
 Các thông số cần hỗ trợ:
 
 - Resolution: 1280 × 720 / 1920 × 1080.
-- FPS: 30 / 60 / 120.
+- FPS: 30 / 60 / 120 / 150 / 200 / 240 (chỉ hiển thị mức camera hỗ trợ).
 - Camera: Front / Back.
 - Camera format.
 - Frame timestamp.
@@ -252,7 +252,7 @@ Quy trình:
 6. Start camera capture.
 7. Forward frames vào WebRTC video pipeline.
 
-Cần kiểm tra `videoSupportedFrameRateRanges` trước khi cho phép chọn 120 FPS.
+Cần kiểm tra `videoSupportedFrameRateRanges` trước khi cho phép chọn từng mức FPS.
 
 ### 4.3. Streaming Configuration
 

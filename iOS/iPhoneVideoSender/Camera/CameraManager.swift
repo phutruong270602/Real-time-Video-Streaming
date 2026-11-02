@@ -14,7 +14,7 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     @Published private(set) var capabilities: [CameraFormatCapability] = []
     @Published private(set) var capabilitiesByCamera: [CameraPosition: [CameraFormatCapability]] = [:]
     @Published private(set) var selectedResolution: VideoResolution = .fullHD
-    @Published private(set) var selectedFPS = 60
+    @Published private(set) var selectedFPS = StreamingConfiguration.defaultFrameRate
     @Published private(set) var selectedCamera: CameraPosition = .back
 
     var onFrame: ((CMSampleBuffer) -> Void)?
@@ -165,7 +165,9 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
             }
 
             let rates = supportedFrameRates(for: initialResolution, in: modes)
-            let initialFPS = rates.contains(60) ? 60 : (rates.first ?? 30)
+            let initialFPS = rates.contains(StreamingConfiguration.defaultFrameRate)
+                ? StreamingConfiguration.defaultFrameRate
+                : (rates.first ?? 30)
 
             try configureSession(
                 device: device,
