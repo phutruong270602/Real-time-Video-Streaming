@@ -51,7 +51,7 @@
 - Trong app, cuộn xuống cuối trang và mở **Application logs** để xem tối đa 60 log gần nhất; danh sách tự cập nhật khi đang mở. Version/build hiển thị ngay đầu trang.
 - Khi chạy app từ Xcode trên iPhone, xem log trong **Debug console**; log cũng có thể xem trong ứng dụng **Console** trên macOS bằng cách chọn iPhone.
 - File `iPhoneVideoSender.log` được ghi trong thư mục Documents của ứng dụng. Trên iPhone, mở **Files → On My iPhone → iPhoneVideoSender** để xem hoặc chia sẻ file.
-- Ứng dụng ghi log khởi động, camera, Bonjour, WebSocket, signaling và trạng thái WebRTC. Không ghi từng frame, số liệu thống kê định kỳ hoặc nội dung SDP/ICE để tránh làm file tăng nhanh và lưu dữ liệu mạng không cần thiết.
+- Ứng dụng ghi log khởi động, camera, Bonjour, WebSocket, signaling và trạng thái WebRTC. Trong khi WebRTC kết nối, app ghi một dòng `PERFORMANCE` mỗi 5 giây gồm capture/encode FPS, bitrate gửi, packet loss, RTT và các thông số mục tiêu để đối chiếu; thay đổi thông số điều khiển được ghi bằng dòng `CONTROL`. Không ghi từng frame hoặc nội dung SDP/ICE.
 
 ---
 

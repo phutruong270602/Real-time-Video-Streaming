@@ -40,7 +40,7 @@ dotnet run --project .\WindowsVideoReceiver\WindowsVideoReceiver.csproj
 
 Để test stream, chạy app Windows và app sender trên iPhone trong cùng mạng LAN, kết nối iPhone tới địa chỉ WebSocket hiển thị trong cửa sổ (hoặc dùng Bonjour), rồi bấm **Start**. Cần app iPhone gửi `CAPABILITIES`, trả lời SDP và gửi video track WebRTC. Nút **Test JavaScript ping–pong** vẫn dùng để kiểm tra cầu nối WebView2.
 
-Nếu video không hiển thị, xem khung **Video diagnostics** trong phần cấu hình: log chỉ rõ signaling, trạng thái WebRTC/ICE, video track, giải mã hay render đang dừng ở bước nào. Log được lưu tại `WindowsVideoReceiver\log\video-diagnostics.log` và cũng xuất hiện trong Debug Output của Visual Studio.
+Nếu video không hiển thị, xem khung **Video diagnostics** trong phần cấu hình: log chỉ rõ signaling, trạng thái WebRTC/ICE, video track, giải mã hay render đang dừng ở bước nào. Log được lưu tại `WindowsVideoReceiver\log\video-diagnostics.log` và cũng xuất hiện trong Debug Output của Visual Studio. Cấu hình và thống kê nhận được được ghi bằng tiếng Anh vào `WindowsVideoReceiver\log\received-statistics.log`; thống kê từ receiver và iPhone được ghi tối đa mỗi 5 giây.
 
 ## Mạng LAN và firewall
 
@@ -49,3 +49,6 @@ Port signaling: **8080**. iPhone có thể tìm Windows Receiver qua Bonjour/mDN
 Trong cửa sổ receiver, chọn **Configure LAN firewall (UAC)** để thêm quy tắc inbound TCP `8080` và UDP `5353`. Script yêu cầu quyền Administrator, chỉ áp dụng cho profile **Private/Domain** và giới hạn nguồn đến **LocalSubnet**; profile Public không được mở. Nếu Wi-Fi là mạng cá nhân đáng tin cậy, đặt Network profile thành Private trong Windows Settings trước khi cấu hình firewall. Không đổi profile thành Private trên Wi-Fi công cộng hoặc mạng không tin cậy.
 
 Thông tin môi trường hiện tại và IP Windows (địa chỉ động) được ghi trong [Documents/DevelopmentEnvironment.md](./Documents/DevelopmentEnvironment.md). Hai thiết bị phải ở cùng mạng; nếu mạng chặn multicast mDNS, dùng IP thủ công.
+
+
+#bash iOS/capture-app-logs.sh "iPhone"

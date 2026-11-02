@@ -21,7 +21,7 @@ final class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
     private static let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
         return RTCPeerConnectionFactory(
-            encoderFactory: RTCVideoEncoderFactoryH264(),
+            encoderFactory: RTCDefaultVideoEncoderFactory(),
             decoderFactory: RTCDefaultVideoDecoderFactory()
         )
     }()
@@ -200,6 +200,13 @@ final class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
             StreamingConfiguration.maximumBitrate
         )
         self.frameRate = frameRate
+        if let cameraManager {
+            videoSource?.adaptOutputFormat(
+                toWidth: cameraManager.selectedResolution.width,
+                height: cameraManager.selectedResolution.height,
+                fps: Int32(frameRate)
+            )
+        }
         configureSender()
     }
 
@@ -270,9 +277,12 @@ final class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
     }
 
     private func startStatisticsTimer() {
-        statsTimer?.invalidate()
-        statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            self?.collectStatistics()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isConnected, self.peerConnection != nil else { return }
+            self.statsTimer?.invalidate()
+            self.statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                self?.collectStatistics()
+            }
         }
     }
 

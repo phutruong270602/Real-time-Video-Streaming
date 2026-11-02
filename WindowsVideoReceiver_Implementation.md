@@ -181,6 +181,7 @@
   - [ ] Ghi nhận Average và P95 latency
 - [ ] **5.6 Ghi log**
   - [ ] Xuất số liệu ra file CSV để phân tích và benchmark
+  - [x] Ghi cấu hình nhận từ iPhone và số liệu receiver/iPhone bằng tiếng Anh vào `WindowsVideoReceiver/log/received-statistics.log` (mỗi nguồn thống kê tối đa một dòng mỗi 5 giây)
 
 **Điều kiện hoàn thành:** thấy đủ các chỉ số trên UI, xuất được log.
 

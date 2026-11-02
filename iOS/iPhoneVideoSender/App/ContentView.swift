@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var streamPreparationTask: Task<Void, Error>?
     @State private var isLogsExpanded = false
     @State private var logLines: [String] = []
+    @State private var lastPerformanceLogDate = Date.distantPast
 
     var body: some View {
         NavigationStack {
@@ -44,10 +45,13 @@ struct ContentView: View {
                 discovery.startSearching()
                 signaling.onMessage = handleSignalingMessage
                 camera.onConfigurationApplied = {
+                    webRTC.updateEncoding(bitrate: bitrate, frameRate: camera.selectedFPS)
+                    logControlSettings(event: "camera_configuration_applied")
                     if signaling.state == .connected {
                         sendConfiguration()
                     }
                 }
+                logControlSettings(event: "camera_ready")
                 camera.onConfigurationError = { message in
                     sendError(code: "CAMERA_CONFIGURATION_FAILED", message: message)
                 }
@@ -72,6 +76,20 @@ struct ContentView: View {
                         packetsLost: stats.packetsLost,
                         rtt: stats.roundTripTime
                     ))
+                    let now = Date()
+                    guard now.timeIntervalSince(lastPerformanceLogDate) >= 5 else { return }
+                    lastPerformanceLogDate = now
+                    AppLogger.info(
+                        """
+                        PERFORMANCE camera=\(camera.selectedCamera.rawValue) resolution=\(camera.selectedResolution.rawValue) \
+                        targetFPS=\(camera.selectedFPS) targetBitrateBps=\(bitrate) \
+                        captureFPS=\(String(format: "%.1f", camera.captureFPS)) \
+                        encodeFPS=\(String(format: "%.1f", stats.encodeFPS)) \
+                        sentBitrateBps=\(stats.bitrate) packetsLost=\(stats.packetsLost) \
+                        rttMs=\(String(format: "%.1f", stats.roundTripTime * 1000))
+                        """,
+                        category: "Streaming"
+                    )
                 }
             }
             .onChange(of: signaling.state) { _, state in
@@ -109,7 +127,7 @@ struct ContentView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.2"
     }
 
     private var buildNumber: String {
@@ -384,6 +402,7 @@ struct ContentView: View {
                 max(value, StreamingConfiguration.minimumBitrate),
                 StreamingConfiguration.maximumBitrate
             )
+            logControlSettings(event: "bitrate_updated_from_receiver")
             webRTC.updateEncoding(bitrate: bitrate, frameRate: camera.selectedFPS)
             sendConfiguration()
         case .setFPS:
@@ -512,6 +531,15 @@ struct ContentView: View {
             camera: camera.selectedCamera.rawValue,
             bitrate: bitrate
         ))
+    }
+
+    private func logControlSettings(event: String) {
+        AppLogger.info(
+            "CONTROL event=\(event) camera=\(camera.selectedCamera.rawValue) " +
+                "resolution=\(camera.selectedResolution.rawValue) " +
+                "targetFPS=\(camera.selectedFPS) targetBitrateBps=\(bitrate)",
+            category: "Streaming"
+        )
     }
 
     private func sendError(code: String, message: String) {

@@ -324,6 +324,11 @@ public partial class MainWindow : Window
                 _viewModel.SelectedCamera = camera;
             }
 
+            _viewModel.LogReceivedConfiguration(
+                _viewModel.SelectedCamera,
+                _viewModel.SelectedResolution?.ToString() ?? "unknown",
+                _viewModel.SelectedFrameRate?.ToString() ?? "unknown",
+                FormatLogMetric(root, "bitrate"));
             _viewModel.LastError = string.Empty;
         }
         finally
@@ -346,6 +351,15 @@ public partial class MainWindow : Window
         _viewModel.PacketLoss = FormatMetric(root, "packetLossPercent", "%");
         _viewModel.Jitter = FormatMetric(root, "jitterMs", " ms");
         _viewModel.RoundTripTime = FormatMetric(root, "rttMs", " ms");
+        _viewModel.LogReceivedStatistics(
+            "receiver",
+            $"receiveFPS={FormatLogMetric(root, "receiveFps")} " +
+                $"decodeFPS={FormatLogMetric(root, "decodeFps")} " +
+                $"renderFPS={FormatLogMetric(root, "renderFps")} " +
+                $"receivedBitrateBps={FormatLogMetric(root, "bitrateBps")} " +
+                $"packetLossPercent={FormatLogMetric(root, "packetLossPercent")} " +
+                $"jitterMs={FormatLogMetric(root, "jitterMs")} " +
+                $"rttMs={FormatLogMetric(root, "rttMs")}");
     }
 
     private void UpdatePhoneStatistics(JsonElement root)
@@ -367,6 +381,33 @@ public partial class MainWindow : Window
         {
             _viewModel.SenderRoundTripTime = $"{roundTripTime:0.0} ms";
         }
+
+        var phoneBitrate = TryGetNumber(root, "bitrate", out bitrate)
+            ? bitrate
+            : TryGetNumber(root, "bitrateBps", out bitrate)
+                ? bitrate
+                : (double?)null;
+        var phoneRttMs = TryGetNumber(root, "rtt", out roundTripTime)
+            ? roundTripTime * 1000
+            : (double?)null;
+        _viewModel.LogReceivedStatistics(
+            "iPhone",
+            $"captureFPS={FormatLogMetric(root, "captureFPS", "captureFps")} " +
+                $"encodeFPS={FormatLogMetric(root, "encodeFPS", "encodeFps")} " +
+                $"sentBitrateBps={(phoneBitrate is { } sentBitrate ? StreamingControlViewModel.FormatLogNumber(sentBitrate) : "n/a")} " +
+                $"packetsLost={FormatLogMetric(root, "packetsLost")} " +
+                $"rttMs={(phoneRttMs is { } rtt ? StreamingControlViewModel.FormatLogNumber(rtt) : "n/a")}");
+    }
+
+    private static string FormatLogMetric(JsonElement root, string propertyName, string? alternateName = null)
+    {
+        if (!TryGetNumber(root, propertyName, out var value) &&
+            (alternateName is null || !TryGetNumber(root, alternateName, out value)))
+        {
+            return "n/a";
+        }
+
+        return StreamingControlViewModel.FormatLogNumber(value);
     }
 
     private void ClearCapabilities()

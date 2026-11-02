@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
 
@@ -27,6 +28,7 @@ public sealed class StreamingControlViewModel : INotifyPropertyChanged
     private string _videoDiagnostics = string.Empty;
     private readonly Queue<string> _videoDiagnosticEntries = new();
     private readonly string _videoDiagnosticsLogPath = GetVideoDiagnosticsLogPath();
+    private readonly Dictionary<string, DateTime> _lastStatisticsLogTime = new(StringComparer.OrdinalIgnoreCase);
     private string _selectedCamera = string.Empty;
     private ResolutionOption? _selectedResolution;
     private int? _selectedFrameRate;
@@ -268,6 +270,46 @@ public sealed class StreamingControlViewModel : INotifyPropertyChanged
 
         VideoDiagnostics = string.Join(Environment.NewLine, _videoDiagnosticEntries);
     }
+
+    public void LogReceivedConfiguration(string camera, string resolution, string frameRate, string bitrate)
+    {
+        AppendReceivedLog(
+            $"CONFIGURATION camera={camera} resolution={resolution} targetFPS={frameRate} targetBitrateBps={bitrate}");
+    }
+
+    public void LogReceivedStatistics(string source, string metrics)
+    {
+        var now = DateTime.UtcNow;
+        if (_lastStatisticsLogTime.TryGetValue(source, out var previous) &&
+            now - previous < TimeSpan.FromSeconds(5))
+        {
+            return;
+        }
+
+        _lastStatisticsLogTime[source] = now;
+        AppendReceivedLog($"STATISTICS source={source} {metrics}");
+    }
+
+    private void AppendReceivedLog(string message)
+    {
+        var logPath = Path.Combine(
+            Path.GetDirectoryName(_videoDiagnosticsLogPath)!,
+            "received-statistics.log");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+            File.AppendAllText(
+                logPath,
+                $"{DateTime.UtcNow:O} {message}{Environment.NewLine}");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            LastError = $"Could not write received statistics log '{logPath}': {exception.Message}";
+        }
+    }
+
+    public static string FormatLogNumber(double value) =>
+        value.ToString("0.##", CultureInfo.InvariantCulture);
 
     private static string GetVideoDiagnosticsLogPath()
     {
