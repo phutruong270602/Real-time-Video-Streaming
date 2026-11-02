@@ -349,7 +349,7 @@ struct ContentView: View {
     private var streamingControls: some View {
         HStack(spacing: 12) {
             Button {
-                startStreaming()
+                startStreaming(requestReceiver: true)
             } label: {
                 Label("Start streaming", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
@@ -448,12 +448,12 @@ struct ContentView: View {
                 sdpMid: message.sdpMid,
                 sdpMLineIndex: lineIndex
             )
-        case .answer, .status, .capabilities, .configApplied, .stats, .error:
+        case .startRequest, .answer, .status, .capabilities, .configApplied, .stats, .error:
             break
         }
     }
 
-    private func startStreaming() {
+    private func startStreaming(requestReceiver: Bool = false) {
         guard signaling.state == .connected else {
             AppLogger.warning("Stream start requested while signaling is disconnected", category: "App")
             return
@@ -463,6 +463,9 @@ struct ContentView: View {
             do {
                 try await prepareStreaming()
                 signaling.send(SignalingMessage(type: .status, state: "connecting"))
+                if requestReceiver {
+                    signaling.send(SignalingMessage(type: .startRequest))
+                }
             } catch {
                 AppLogger.error("Could not start video stream: \(error.localizedDescription)", category: "App")
                 sendError(code: "WEBRTC_START_FAILED", message: error.localizedDescription)

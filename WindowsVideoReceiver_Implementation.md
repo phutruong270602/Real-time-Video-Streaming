@@ -171,9 +171,9 @@
   - [x] Jitter (`jitter`)
   - [x] RTT (`currentRoundTripTime`)
 - [ ] **5.2 Render FPS**
-  - [x] Đo bằng `requestVideoFrameCallback` trên thẻ `<video>`
+  - [x] Đo từ `presentedFrames` trong metadata của `requestVideoFrameCallback` trên thẻ `<video>`
 - [ ] **5.3 Số liệu từ iPhone**
-  - [x] Nhận `STATS`: Capture FPS, Encode FPS
+  - [x] Nhận `STATS`: Capture FPS, Encode FPS, bitrate, số packet bị mất (`packetsLost`), RTT
 - [ ] **5.4 Hiển thị trên UI**
   - [x] Bảng Performance Monitoring hiển thị các chỉ số nhận được
   - [ ] Đổi màu cảnh báo khi packet loss/RTT vượt ngưỡng

@@ -316,7 +316,7 @@ Lưu ý: Điều chỉnh bitrate không đồng nghĩa tự động thay đổi 
 | `ICE_CANDIDATE` | Hai chiều | `candidate`, `sdpMid`, `sdpMLineIndex` |
 | `STATUS` | Hai chiều | `state` (connecting / connected / failed / closed) |
 
-### 6.3. Message điều khiển (Windows → iPhone)
+### 6.3. Message điều khiển
 
 | type | Giá trị | Hành vi trên iPhone |
 |---|---|---|
@@ -326,6 +326,8 @@ Lưu ý: Điều chỉnh bitrate không đồng nghĩa tự động thay đổi 
 | `SET_FPS` | `value` (30/60/120) | Cấu hình lại camera format và encoder |
 | `SET_RESOLUTION` | `width`, `height` | Cấu hình lại camera format và encoder |
 | `SET_CAMERA` | `value` (front/back) | Chuyển camera |
+
+Khi người dùng nhấn Start trên iPhone, iPhone gửi `START_REQUEST` tới Windows để Windows khởi tạo WebRTC receiver và tạo Offer. Message này khác với `START` do Windows gửi xuống để tránh lặp lệnh.
 
 Ví dụ:
 

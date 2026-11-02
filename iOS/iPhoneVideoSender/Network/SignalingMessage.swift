@@ -6,6 +6,7 @@ enum SignalingMessageType: String, Codable {
     case iceCandidate = "ICE_CANDIDATE"
     case status = "STATUS"
     case start = "START"
+    case startRequest = "START_REQUEST"
     case stop = "STOP"
     case setBitrate = "SET_BITRATE"
     case setFPS = "SET_FPS"

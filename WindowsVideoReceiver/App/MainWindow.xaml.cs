@@ -230,6 +230,12 @@ public partial class MainWindow : Window
                 case "STATUS":
                     UpdateStreamingStatus(root, "iPhone");
                     break;
+                case "START_REQUEST":
+                    if (!_viewModel.IsStreaming)
+                    {
+                        StartReceiverConnection();
+                    }
+                    break;
             }
 
             if (messageType is "ANSWER" or "ICE_CANDIDATE")
@@ -435,9 +441,9 @@ public partial class MainWindow : Window
             _viewModel.SenderBitrate = $"{bitrate / 1_000_000:0.00} Mbps";
         }
 
-        if (TryGetNumber(root, "packetLoss", out var packetLoss))
+        if (TryGetNumber(root, "packetsLost", out var packetsLost))
         {
-            _viewModel.SenderPacketLoss = $"{packetLoss:0.00}%";
+            _viewModel.SenderPacketLoss = $"{packetsLost:0} packets";
         }
 
         if (TryGetNumber(root, "rtt", out var roundTripTime))
@@ -727,6 +733,11 @@ public partial class MainWindow : Window
         }
 
         await SendControlMessageAsync(new { type = "START" });
+        StartReceiverConnection();
+    }
+
+    private void StartReceiverConnection()
+    {
         VideoPlayer.StartConnection();
         _viewModel.IsStreaming = true;
         _viewModel.ConnectionStatus = "Stream start request sent";

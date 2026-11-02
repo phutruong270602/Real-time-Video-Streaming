@@ -19,8 +19,8 @@
     let peerConnection = null;
     let statsTimer = null;
     let previousInboundStats = null;
-    let renderedFrames = 0;
     let renderWindowStartedAt = 0;
+    let renderWindowStartPresentedFrames = 0;
     let renderFps = 0;
     let lastVideoDiagnosis = "";
     let hasRenderedVideoFrame = false;
@@ -95,8 +95,7 @@
         return;
       }
 
-      const onFrame = (now) => {
-        renderedFrames++;
+      const onFrame = (now, metadata) => {
         if (!hasRenderedVideoFrame) {
           hasRenderedVideoFrame = true;
           placeholder.hidden = true;
@@ -104,10 +103,12 @@
         }
         if (renderWindowStartedAt === 0) {
           renderWindowStartedAt = now;
+          renderWindowStartPresentedFrames = metadata.presentedFrames;
         } else if (now - renderWindowStartedAt >= 1000) {
-          renderFps = renderedFrames * 1000 / (now - renderWindowStartedAt);
-          renderedFrames = 0;
+          renderFps = (metadata.presentedFrames - renderWindowStartPresentedFrames) *
+            1000 / (now - renderWindowStartedAt);
           renderWindowStartedAt = now;
+          renderWindowStartPresentedFrames = metadata.presentedFrames;
         }
 
         video.requestVideoFrameCallback(onFrame);
@@ -203,8 +204,8 @@
 
       setPlaceholder("Video ended. Press Start to receive the stream again.");
       postMessage({ type: "STATUS", state: "stopped" });
-      renderedFrames = 0;
       renderWindowStartedAt = 0;
+      renderWindowStartPresentedFrames = 0;
       renderFps = 0;
       hasRenderedVideoFrame = false;
       hasRemoteVideoTrack = false;

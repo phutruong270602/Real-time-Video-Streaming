@@ -110,6 +110,7 @@
   - [x] Gửi trạng thái kết nối
 - [x] **2.6 Start / Stop streaming**
   - [x] Nút Start/Stop trên UI
+  - [x] Start trên iPhone yêu cầu Windows khởi tạo WebRTC receiver
   - [x] Xử lý lệnh `START` / `STOP` từ Windows
   - [x] Đóng PeerConnection và dừng capture khi Stop
 - [ ] **2.7 Test với receiver mẫu**

@@ -106,7 +106,7 @@
                     <TextBlock Text="{Binding SenderBitrate}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
                     <TextBlock Text="Receiver packet loss" Foreground="#94A3B8" />
                     <TextBlock Text="{Binding PacketLoss}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
-                    <TextBlock Text="Sender packet loss (iPhone)" Foreground="#94A3B8" />
+                    <TextBlock Text="Sender packets lost (iPhone)" Foreground="#94A3B8" />
                     <TextBlock Text="{Binding SenderPacketLoss}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
                     <TextBlock Text="Jitter" Foreground="#94A3B8" />
                     <TextBlock Text="{Binding Jitter}" Foreground="White" FontSize="22" Margin="0,2,0,10" />

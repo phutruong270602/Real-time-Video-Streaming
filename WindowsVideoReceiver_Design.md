@@ -227,7 +227,7 @@ Các tùy chọn Resolution / FPS / Camera nên được điền dựa trên mes
 | RTT | Round-trip time |
 | Latency | Estimated end-to-end delay |
 
-Nguồn dữ liệu phía Windows: `RTCPeerConnection.getStats()` (inbound-rtp: `framesReceived`, `framesDecoded`, `framesPerSecond`, `packetsLost`, `jitter`, `jitterBufferDelay`; candidate-pair: `currentRoundTripTime`) và `requestVideoFrameCallback` để đo Render FPS.
+Nguồn dữ liệu phía Windows: `RTCPeerConnection.getStats()` (inbound-rtp: `framesReceived`, `framesDecoded`, `framesPerSecond`, `packetsLost`, `jitter`, `jitterBufferDelay`; candidate-pair: `currentRoundTripTime`) và `requestVideoFrameCallback` metadata `presentedFrames` để đo số frame đã submit lên compositor cho Render FPS.
 
 ---
 
@@ -325,7 +325,7 @@ Lưu ý: Điều chỉnh bitrate không đồng nghĩa tự động thay đổi 
 | `ICE_CANDIDATE` | Hai chiều | `candidate`, `sdpMid`, `sdpMLineIndex` |
 | `STATUS` | Hai chiều | `state` (connecting / connected / failed / closed) |
 
-### 6.3. Message điều khiển (Windows → iPhone)
+### 6.3. Message điều khiển
 
 | type | Giá trị | Kích hoạt từ UI |
 |---|---|---|
@@ -335,6 +335,8 @@ Lưu ý: Điều chỉnh bitrate không đồng nghĩa tự động thay đổi 
 | `SET_FPS` | `value` (30/60/120) | FPS ComboBox |
 | `SET_RESOLUTION` | `width`, `height` | Resolution ComboBox |
 | `SET_CAMERA` | `value` (front/back) | Camera ComboBox |
+
+Khi nhận `START_REQUEST` từ iPhone, Windows khởi tạo WebRTC receiver và tạo Offer; không gửi lại lệnh `START`.
 
 Ví dụ:
 
