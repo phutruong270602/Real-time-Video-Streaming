@@ -1,17 +1,15 @@
 using System.ComponentModel;
 using System.Collections.ObjectModel;
-using System.Globalization;
-using System.IO;
 using System.Runtime.CompilerServices;
 
 namespace WindowsVideoReceiver.Controls;
 
 public sealed class StreamingControlViewModel : INotifyPropertyChanged
 {
-    private string _connectionStatus = "Chưa kết nối iPhone";
-    private string _bridgeStatus = "Đang khởi tạo WebView2";
-    private string _discoveryStatus = "Đang khởi tạo Bonjour";
-    private string _manualAddress = "Đang xác định địa chỉ mạng...";
+    private string _connectionStatus = "iPhone not connected";
+    private string _bridgeStatus = "Initializing WebView2";
+    private string _discoveryStatus = "Initializing Bonjour";
+    private string _manualAddress = "Detecting network address...";
     private string _receiveFps = "--";
     private string _decodeFps = "--";
     private string _renderFps = "--";
@@ -27,8 +25,6 @@ public sealed class StreamingControlViewModel : INotifyPropertyChanged
     private string _lastError = string.Empty;
     private string _videoDiagnostics = string.Empty;
     private readonly Queue<string> _videoDiagnosticEntries = new();
-    private readonly string _videoDiagnosticsLogPath = GetVideoDiagnosticsLogPath();
-    private readonly Dictionary<string, DateTime> _lastStatisticsLogTime = new(StringComparer.OrdinalIgnoreCase);
     private string _selectedCamera = string.Empty;
     private ResolutionOption? _selectedResolution;
     private int? _selectedFrameRate;
@@ -153,8 +149,6 @@ public sealed class StreamingControlViewModel : INotifyPropertyChanged
         private set => SetProperty(ref _videoDiagnostics, value);
     }
 
-    public string VideoDiagnosticsLogPath => _videoDiagnosticsLogPath;
-
     public ResolutionOption? SelectedResolution
     {
         get => _selectedResolution;
@@ -251,17 +245,6 @@ public sealed class StreamingControlViewModel : INotifyPropertyChanged
     public void AddVideoDiagnostic(string stage, string message)
     {
         var entry = $"{DateTime.Now:HH:mm:ss} [{stage}] {message.ReplaceLineEndings(" ")}";
-        System.Diagnostics.Debug.WriteLine(entry);
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(_videoDiagnosticsLogPath)!);
-            File.AppendAllText(_videoDiagnosticsLogPath, entry + Environment.NewLine);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            LastError = $"Không ghi được file log '{_videoDiagnosticsLogPath}': {exception.Message}";
-        }
-
         _videoDiagnosticEntries.Enqueue(entry);
         while (_videoDiagnosticEntries.Count > 100)
         {
@@ -269,61 +252,6 @@ public sealed class StreamingControlViewModel : INotifyPropertyChanged
         }
 
         VideoDiagnostics = string.Join(Environment.NewLine, _videoDiagnosticEntries);
-    }
-
-    public void LogReceivedConfiguration(string camera, string resolution, string frameRate, string bitrate)
-    {
-        AppendReceivedLog(
-            $"CONFIGURATION camera={camera} resolution={resolution} targetFPS={frameRate} targetBitrateBps={bitrate}");
-    }
-
-    public void LogReceivedStatistics(string source, string metrics)
-    {
-        var now = DateTime.UtcNow;
-        if (_lastStatisticsLogTime.TryGetValue(source, out var previous) &&
-            now - previous < TimeSpan.FromSeconds(5))
-        {
-            return;
-        }
-
-        _lastStatisticsLogTime[source] = now;
-        AppendReceivedLog($"STATISTICS source={source} {metrics}");
-    }
-
-    private void AppendReceivedLog(string message)
-    {
-        var logPath = Path.Combine(
-            Path.GetDirectoryName(_videoDiagnosticsLogPath)!,
-            "received-statistics.log");
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-            File.AppendAllText(
-                logPath,
-                $"{DateTime.UtcNow:O} {message}{Environment.NewLine}");
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            LastError = $"Could not write received statistics log '{logPath}': {exception.Message}";
-        }
-    }
-
-    public static string FormatLogNumber(double value) =>
-        value.ToString("0.##", CultureInfo.InvariantCulture);
-
-    private static string GetVideoDiagnosticsLogPath()
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
-             directory is not null;
-             directory = directory.Parent)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "WindowsVideoReceiver.csproj")))
-            {
-                return Path.Combine(directory.FullName, "log", "video-diagnostics.log");
-            }
-        }
-
-        return Path.Combine(AppContext.BaseDirectory, "log", "video-diagnostics.log");
     }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

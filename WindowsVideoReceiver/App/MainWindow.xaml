@@ -79,13 +79,6 @@
                                TextWrapping="Wrap" Margin="0,10,0,0" />
                     <TextBlock Text="Video diagnostics" Foreground="#CBD5E1"
                                FontWeight="SemiBold" Margin="0,14,0,4" />
-                    <TextBlock Text="{Binding VideoDiagnosticsLogPath, Mode=OneWay}"
-                               Foreground="#94A3B8" TextWrapping="Wrap" FontSize="10"
-                               Margin="0,0,0,4" />
-                    <TextBox x:Name="VideoDiagnosticsTextBox" Text="{Binding VideoDiagnostics, Mode=OneWay}" IsReadOnly="True"
-                             TextWrapping="Wrap" AcceptsReturn="True" Height="140"
-                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                             FontFamily="Consolas" FontSize="11" />
                     <TextBlock Text="Stream controls are populated from the iPhone's CAPABILITIES message."
                                Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,12,0,0" />
                 </StackPanel>

@@ -46,7 +46,7 @@ internal sealed class SignalingServer : IDisposable
 
         _listener.Start();
         _acceptLoop = Task.Run(() => AcceptLoopAsync(_shutdown.Token));
-        StatusChanged?.Invoke(this, "Signaling server đang lắng nghe trên ws://localhost:8080");
+        StatusChanged?.Invoke(this, "Signaling server listening on ws://localhost:8080");
         return Task.CompletedTask;
     }
 
@@ -82,7 +82,7 @@ internal sealed class SignalingServer : IDisposable
             await _acceptLoop;
         }
 
-        StatusChanged?.Invoke(this, "Signaling server đã dừng");
+        StatusChanged?.Invoke(this, "Signaling server stopped");
     }
 
     public async Task SendAsync(string message)
@@ -95,7 +95,7 @@ internal sealed class SignalingServer : IDisposable
             var client = GetConnectedClients().FirstOrDefault();
             if (client is null)
             {
-                throw new InvalidOperationException("Chưa có iPhone kết nối WebSocket signaling.");
+                throw new InvalidOperationException("No iPhone is connected to the signaling WebSocket.");
             }
 
             try
@@ -111,8 +111,8 @@ internal sealed class SignalingServer : IDisposable
                     _clients.Remove(client);
                 }
 
-                StatusChanged?.Invoke(this, "iPhone đã ngắt kết nối signaling");
-                throw new IOException("Kết nối WebSocket với iPhone đã bị ngắt.", exception);
+                StatusChanged?.Invoke(this, "iPhone disconnected from signaling");
+                throw new IOException("The WebSocket connection to the iPhone was interrupted.", exception);
             }
         }
         finally
@@ -207,7 +207,7 @@ internal sealed class SignalingServer : IDisposable
                            $"Sec-WebSocket-Accept: {acceptValue}\r\n\r\n";
             var responseBytes = Utf8.GetBytes(response);
             await stream.WriteAsync(responseBytes, cancellationToken);
-            StatusChanged?.Invoke(this, "iPhone đã kết nối đến signaling server");
+            StatusChanged?.Invoke(this, "iPhone connected to the signaling server");
 
             while (!cancellationToken.IsCancellationRequested && client.Connected)
             {
@@ -251,7 +251,7 @@ internal sealed class SignalingServer : IDisposable
 
             if (wasActiveClient)
             {
-                StatusChanged?.Invoke(this, "iPhone đã ngắt kết nối signaling");
+                StatusChanged?.Invoke(this, "iPhone disconnected from signaling");
             }
         }
     }

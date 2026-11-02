@@ -24,18 +24,18 @@ public partial class VideoPlayerView : UserControl
         {
             if (args.IsSuccess)
             {
-                StatusChanged?.Invoke(this, "Trang receiver đã được nạp");
+                StatusChanged?.Invoke(this, "Receiver page loaded");
             }
             else
             {
-                StatusChanged?.Invoke(this, $"Không thể nạp trang receiver: {args.WebErrorStatus}");
+                StatusChanged?.Invoke(this, $"Could not load receiver page: {args.WebErrorStatus}");
             }
         };
 
         var pagePath = Path.Combine(AppContext.BaseDirectory, "Streaming", "receiver.html");
         if (!File.Exists(pagePath))
         {
-            throw new FileNotFoundException("Không tìm thấy trang WebRTC receiver.", pagePath);
+            throw new FileNotFoundException("WebRTC receiver page not found.", pagePath);
         }
 
         WebView.CoreWebView2.Navigate(new Uri(pagePath).AbsoluteUri);
@@ -45,7 +45,7 @@ public partial class VideoPlayerView : UserControl
     {
         if (WebView.CoreWebView2 is null)
         {
-            StatusChanged?.Invoke(this, "WebView2 chưa sẵn sàng");
+            StatusChanged?.Invoke(this, "WebView2 is not ready");
             return;
         }
 
@@ -65,7 +65,7 @@ public partial class VideoPlayerView : UserControl
     public void SendPing()
     {
         PostMessageToJavaScript("""{"type":"PING"}""");
-        StatusChanged?.Invoke(this, "Đã gửi PING tới JavaScript");
+        StatusChanged?.Invoke(this, "PING sent to JavaScript");
     }
 
     private void SendPing_Click(object sender, RoutedEventArgs e)
@@ -87,17 +87,17 @@ public partial class VideoPlayerView : UserControl
                 if (messageType == "STATUS" && message.RootElement.TryGetProperty("state", out var state) &&
                     state.ValueKind == JsonValueKind.String)
                 {
-                    StatusChanged?.Invoke(this, $"Trạng thái signaling: {state.GetString()}");
+                    StatusChanged?.Invoke(this, $"Signaling state: {state.GetString()}");
                 }
             }
             else
             {
-                StatusChanged?.Invoke(this, "JavaScript gửi message không có trường type dạng chuỗi");
+                StatusChanged?.Invoke(this, "JavaScript message is missing a string type field");
             }
         }
         catch (JsonException exception)
         {
-            StatusChanged?.Invoke(this, $"Message JavaScript không hợp lệ: {exception.Message}");
+            StatusChanged?.Invoke(this, $"Invalid JavaScript message: {exception.Message}");
         }
     }
 }

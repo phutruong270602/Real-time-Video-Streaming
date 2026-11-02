@@ -12,7 +12,7 @@
 </head>
 <body>
   <video id="remote-video" autoplay muted playsinline></video>
-  <div id="placeholder">Đang chờ kết nối video từ iPhone</div>
+  <div id="placeholder">Waiting for video from iPhone</div>
   <script>
     const video = document.getElementById("remote-video");
     const placeholder = document.getElementById("placeholder");
@@ -44,27 +44,27 @@
       if (!inbound) {
         diagnosis = [
           "No inbound video RTP stats",
-          "Chưa có luồng RTP video; kiểm tra iPhone đã gửi video track và trả lời SDP chưa."
+          "No video RTP stream yet; check that the iPhone sent a video track and an SDP answer."
         ];
       } else if ((inbound.framesReceived || 0) === 0 && (inbound.packetsReceived || 0) === 0) {
         diagnosis = [
           "RTP has no video packets",
-          "Đã có thống kê track nhưng chưa nhận packet/frame video từ iPhone."
+          "Track statistics are available, but no video packets or frames have arrived from the iPhone."
         ];
       } else if ((inbound.framesDecoded || 0) === 0) {
         diagnosis = [
           "Video received but not decoded",
-          `Đã nhận ${inbound.framesReceived || 0} frame nhưng chưa giải mã được frame nào.`
+          `Received ${inbound.framesReceived || 0} frames, but none have been decoded.`
         ];
       } else if (!hasRenderedVideoFrame) {
         diagnosis = [
           "Decoded frames not rendered",
-          `Đã giải mã ${inbound.framesDecoded} frame nhưng phần tử video chưa render frame.`
+          `Decoded ${inbound.framesDecoded} frames, but the video element has not rendered any.`
         ];
       } else {
         diagnosis = [
           "Video rendering",
-          `Video đang hiển thị (${renderFps.toFixed(1)} FPS).`
+          `Video is rendering (${renderFps.toFixed(1)} FPS).`
         ];
       }
 
@@ -100,7 +100,7 @@
         if (!hasRenderedVideoFrame) {
           hasRenderedVideoFrame = true;
           placeholder.hidden = true;
-          reportDiagnostic("video-render", "Phần tử video đã render frame đầu tiên.");
+          reportDiagnostic("video-render", "The video element rendered its first frame.");
         }
         if (renderWindowStartedAt === 0) {
           renderWindowStartedAt = now;
@@ -191,7 +191,7 @@
     const stopPeerConnection = () => {
       stopStatistics();
       if (peerConnection) {
-        reportDiagnostic("webrtc", "Đóng PeerConnection.");
+        reportDiagnostic("webrtc", "Closing peer connection.");
         peerConnection.close();
         peerConnection = null;
       }
@@ -201,7 +201,7 @@
         video.srcObject = null;
       }
 
-      setPlaceholder("Video đã kết thúc. Chờ Start để nhận lại stream");
+      setPlaceholder("Video ended. Press Start to receive the stream again.");
       postMessage({ type: "STATUS", state: "stopped" });
       renderedFrames = 0;
       renderWindowStartedAt = 0;
@@ -212,7 +212,7 @@
     };
 
     const startPeerConnection = async () => {
-      reportDiagnostic("webrtc", "Bắt đầu tạo PeerConnection nhận video.");
+      reportDiagnostic("webrtc", "Creating a peer connection to receive video.");
       if (peerConnection) {
         peerConnection.close();
       }
@@ -221,12 +221,12 @@
       hasRenderedVideoFrame = false;
       hasRemoteVideoTrack = false;
       lastVideoDiagnosis = "";
-      setPlaceholder("Đang kết nối với iPhone...");
+      setPlaceholder("Connecting to iPhone...");
 
       peerConnection = new RTCPeerConnection({ iceServers: [] });
       const currentConnection = peerConnection;
       currentConnection.addTransceiver("video", { direction: "recvonly" });
-      reportDiagnostic("webrtc", "Đã tạo video transceiver ở chế độ recvonly.");
+      reportDiagnostic("webrtc", "Created video transceiver in recvonly mode.");
 
       currentConnection.ontrack = (event) => {
         if (peerConnection !== currentConnection) {
@@ -235,25 +235,25 @@
         hasRemoteVideoTrack = event.track.kind === "video";
         reportDiagnostic(
           "video-track",
-          `Đã nhận track ${event.track.kind} (readyState=${event.track.readyState}, muted=${event.track.muted}).`
+          `Received ${event.track.kind} track (readyState=${event.track.readyState}, muted=${event.track.muted}).`
         );
-        setPlaceholder("Đã nhận track video, đang chờ frame đầu tiên...");
+        setPlaceholder("Video track received. Waiting for the first frame...");
         event.track.addEventListener("mute", () => {
-          reportDiagnostic("video-track", "Video track đang muted; chưa có dữ liệu video.");
-          setPlaceholder("Video track đang chờ dữ liệu từ iPhone...");
+          reportDiagnostic("video-track", "Video track is muted; no video data is available yet.");
+          setPlaceholder("Video track is waiting for data from the iPhone...");
         });
         event.track.addEventListener("unmute", () => {
-          reportDiagnostic("video-track", "Video track đã unmute, đang chờ frame hiển thị.");
+          reportDiagnostic("video-track", "Video track unmuted; waiting for a frame to render.");
         });
         event.track.addEventListener("ended", () => {
-          reportDiagnostic("video-track", "Video track đã kết thúc.");
-          setPlaceholder("Video track đã kết thúc.");
+          reportDiagnostic("video-track", "Video track ended.");
+          setPlaceholder("Video track ended.");
         });
         const mediaStream = event.streams[0] || new MediaStream([event.track]);
         video.srcObject = mediaStream;
         video.play().then(() => {
           if (peerConnection === currentConnection && video.srcObject === mediaStream) {
-            reportDiagnostic("video-playback", "Lệnh phát video được trình duyệt chấp nhận.");
+            reportDiagnostic("video-playback", "The browser accepted the video playback request.");
           }
         }).catch((error) => {
           if (peerConnection !== currentConnection || video.srcObject !== mediaStream ||
@@ -261,7 +261,7 @@
             return;
           }
           const message = error instanceof Error ? error.message : String(error);
-          setPlaceholder(`Không thể phát video: ${message}`);
+          setPlaceholder(`Could not play video: ${message}`);
           postMessage({ type: "ERROR", code: "video_play_failed", message });
         });
       };
@@ -297,12 +297,12 @@
           return;
         }
 
-        reportDiagnostic("signaling", "Đã tạo offer và gửi tới iPhone để thương lượng video.");
+        reportDiagnostic("signaling", "Created and sent an offer to the iPhone to negotiate video.");
         postMessage({ type: "OFFER", sdp: currentConnection.localDescription.sdp });
         postMessage({ type: "STATUS", state: "connecting" });
         window.setTimeout(() => {
           if (peerConnection === currentConnection && !currentConnection.remoteDescription) {
-            reportDiagnostic("signaling", "Đã gửi offer nhưng chưa nhận ANSWER SDP từ iPhone.");
+            reportDiagnostic("signaling", "Offer sent, but no SDP answer received from the iPhone.");
           }
         }, 5000);
         statsTimer = window.setInterval(() => void collectStatistics(), 1000);
@@ -319,27 +319,27 @@
     video.addEventListener("loadedmetadata", () => {
       reportDiagnostic(
         "video-element",
-        `Video metadata đã tải (${video.videoWidth}x${video.videoHeight}).`
+        `Video metadata loaded (${video.videoWidth}x${video.videoHeight}).`
       );
     });
     video.addEventListener("playing", () => {
-      reportDiagnostic("video-element", "Video element phát; đang xác nhận frame render.");
+      reportDiagnostic("video-element", "Video element is playing; confirming rendered frames.");
       if (typeof video.requestVideoFrameCallback !== "function") {
         placeholder.hidden = true;
       }
     });
     video.addEventListener("waiting", () => {
       if (!hasRenderedVideoFrame) {
-        setPlaceholder("Video đang chờ dữ liệu/frame từ iPhone...");
+        setPlaceholder("Video is waiting for data or frames from the iPhone...");
       }
-      reportDiagnostic("video-element", "Video element đang chờ dữ liệu.");
+      reportDiagnostic("video-element", "Video element is waiting for data.");
     });
     video.addEventListener("error", () => {
       const error = video.error;
       const message = error
         ? `MediaError code=${error.code}${error.message ? `: ${error.message}` : ""}`
-        : "Lỗi media không có thông tin chi tiết.";
-      setPlaceholder(`Lỗi video: ${message}`);
+        : "Media error with no details.";
+      setPlaceholder(`Video error: ${message}`);
       postMessage({ type: "ERROR", code: "video_element_error", message });
     });
 
@@ -377,33 +377,33 @@
 
       if (message.type === "ANSWER") {
         if (!peerConnection) {
-          reportDiagnostic("signaling", "Nhận ANSWER nhưng chưa có PeerConnection; bỏ qua.");
+          reportDiagnostic("signaling", "Received ANSWER without a peer connection; ignoring.");
           return;
         }
 
         try {
           await peerConnection.setRemoteDescription({ type: "answer", sdp: message.sdp });
-          reportDiagnostic("signaling", "Đã áp dụng ANSWER SDP từ iPhone.");
+          reportDiagnostic("signaling", "Applied SDP answer from the iPhone.");
           const videoSection = String(message.sdp || "")
             .split(/(?=m=)/)
             .find(section => section.startsWith("m=video "));
           const direction = videoSection?.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/m)?.[1] || "sendrecv";
           if (!videoSection) {
-            reportDiagnostic("signaling", "ANSWER SDP không có media section m=video.");
+            reportDiagnostic("signaling", "SDP answer has no m=video media section.");
           } else if (direction === "recvonly" || direction === "inactive") {
             reportDiagnostic(
               "signaling",
-              `ANSWER SDP có video nhưng direction=${direction}; iPhone chưa gửi video về receiver.`
+              `SDP answer has video but direction=${direction}; the iPhone is not sending video to the receiver.`
             );
           } else {
-            reportDiagnostic("signaling", `ANSWER SDP cho phép gửi video (direction=${direction}).`);
+            reportDiagnostic("signaling", `SDP answer allows video transmission (direction=${direction}).`);
           }
           const answeredConnection = peerConnection;
           window.setTimeout(() => {
             if (peerConnection === answeredConnection && !hasRemoteVideoTrack) {
               reportDiagnostic(
                 "video-track",
-                "Đã nhận ANSWER nhưng không phát sinh ontrack; kiểm tra video m-line và sender track trên iPhone."
+                "Received SDP answer but no ontrack event occurred; check the video m-line and sender track on the iPhone."
               );
             }
           }, 3000);
@@ -428,7 +428,7 @@
             sdpMid: message.sdpMid,
             sdpMLineIndex: message.sdpMLineIndex
           });
-          reportDiagnostic("ice", "Đã thêm ICE candidate từ iPhone.");
+          reportDiagnostic("ice", "Added ICE candidate from the iPhone.");
         } catch (error) {
           postMessage({
             type: "ERROR",

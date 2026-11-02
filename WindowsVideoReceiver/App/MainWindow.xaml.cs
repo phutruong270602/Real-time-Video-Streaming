@@ -30,13 +30,6 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = _viewModel;
-        _viewModel.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName == nameof(StreamingControlViewModel.VideoDiagnostics))
-            {
-                VideoDiagnosticsTextBox.ScrollToEnd();
-            }
-        };
 
         VideoPlayer.StatusChanged += (_, status) => _viewModel.BridgeStatus = status;
         VideoPlayer.MessageReceived += (_, message) => HandleReceiverMessage(message);
@@ -47,7 +40,7 @@ public partial class MainWindow : Window
             {
                 _viewModel.ConnectionStatus = state;
                 _viewModel.IsSignalingConnected = state.StartsWith(
-                    "iPhone đã kết nối",
+                    "iPhone connected",
                     StringComparison.OrdinalIgnoreCase);
                 if (!_viewModel.IsSignalingConnected)
                 {
@@ -72,17 +65,17 @@ public partial class MainWindow : Window
             await VideoPlayer.InitializeAsync();
             await _signalingServer.StartAsync();
             _viewModel.ManualAddress = $"ws://{GetLanAddress()}:8080";
-            _viewModel.ConnectionStatus = "Đang chờ iPhone kết nối";
+            _viewModel.ConnectionStatus = "Waiting for iPhone to connect";
 
             try
             {
                 _bonjourAdvertiser = new BonjourServiceAdvertiser();
                 _bonjourAdvertiser.Start();
-                _viewModel.DiscoveryStatus = "Đang công bố _wvr-signal._tcp trên mạng cục bộ.";
+                _viewModel.DiscoveryStatus = "Advertising _wvr-signal._tcp on the local network.";
             }
             catch (Exception exception)
             {
-                _viewModel.DiscoveryStatus = $"Không thể công bố Bonjour: {exception.Message}";
+                _viewModel.DiscoveryStatus = $"Could not advertise Bonjour: {exception.Message}";
             }
         }
         catch (Exception exception) when (
@@ -93,11 +86,11 @@ public partial class MainWindow : Window
                 InvalidOperationException or
                 SocketException)
         {
-            _viewModel.BridgeStatus = $"Lỗi khởi tạo: {exception.Message}";
+            _viewModel.BridgeStatus = $"Initialization error: {exception.Message}";
             MessageBox.Show(
                 this,
                 exception.Message,
-                "Không thể khởi tạo receiver",
+                "Could not initialize receiver",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -118,7 +111,7 @@ public partial class MainWindow : Window
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
-                _viewModel.LastError = "Message WebRTC phải là một JSON object.";
+                _viewModel.LastError = "WebRTC message must be a JSON object.";
                 return;
             }
 
@@ -129,7 +122,7 @@ public partial class MainWindow : Window
 
             if (messageType == "PONG")
             {
-                _viewModel.BridgeStatus = "JavaScript ping–pong thành công";
+                _viewModel.BridgeStatus = "JavaScript ping-pong succeeded";
                 return;
             }
 
@@ -140,7 +133,7 @@ public partial class MainWindow : Window
                     : "receiver";
                 var message = TryGetString(root, "message", out var diagnosticMessage)
                     ? diagnosticMessage
-                    : "Diagnostic không có nội dung.";
+                    : "Diagnostic has no content.";
                 _viewModel.AddVideoDiagnostic(stage, message);
                 return;
             }
@@ -169,7 +162,7 @@ public partial class MainWindow : Window
         }
         catch (JsonException exception)
         {
-            _viewModel.LastError = $"Message WebRTC không hợp lệ: {exception.Message}";
+            _viewModel.LastError = $"Invalid WebRTC message: {exception.Message}";
         }
     }
 
@@ -181,7 +174,7 @@ public partial class MainWindow : Window
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
-                _viewModel.LastError = "Message từ iPhone phải là một JSON object.";
+                _viewModel.LastError = "Message from iPhone must be a JSON object.";
                 return;
             }
 
@@ -192,7 +185,7 @@ public partial class MainWindow : Window
 
             if (messageType != "STATS")
             {
-                _viewModel.AddVideoDiagnostic("iPhone-signaling", $"Nhận {messageType} từ iPhone.");
+                _viewModel.AddVideoDiagnostic("iPhone-signaling", $"Received {messageType} from iPhone.");
             }
 
             switch (messageType)
@@ -221,7 +214,7 @@ public partial class MainWindow : Window
         }
         catch (JsonException exception)
         {
-            _viewModel.LastError = $"Message từ iPhone không hợp lệ: {exception.Message}";
+            _viewModel.LastError = $"Invalid message from iPhone: {exception.Message}";
         }
     }
 
@@ -383,11 +376,6 @@ public partial class MainWindow : Window
             _appliedCamera = _viewModel.SelectedCamera;
             _appliedFrameRate = _viewModel.SelectedFrameRate;
 
-            _viewModel.LogReceivedConfiguration(
-                _viewModel.SelectedCamera,
-                _viewModel.SelectedResolution?.ToString() ?? "unknown",
-                _viewModel.SelectedFrameRate?.ToString() ?? "unknown",
-                FormatLogMetric(root, "bitrate"));
             _viewModel.LastError = string.Empty;
         }
         finally
@@ -410,15 +398,6 @@ public partial class MainWindow : Window
         _viewModel.PacketLoss = FormatMetric(root, "packetLossPercent", "%");
         _viewModel.Jitter = FormatMetric(root, "jitterMs", " ms");
         _viewModel.RoundTripTime = FormatMetric(root, "rttMs", " ms");
-        _viewModel.LogReceivedStatistics(
-            "receiver",
-            $"receiveFPS={FormatLogMetric(root, "receiveFps")} " +
-                $"decodeFPS={FormatLogMetric(root, "decodeFps")} " +
-                $"renderFPS={FormatLogMetric(root, "renderFps")} " +
-                $"receivedBitrateBps={FormatLogMetric(root, "bitrateBps")} " +
-                $"packetLossPercent={FormatLogMetric(root, "packetLossPercent")} " +
-                $"jitterMs={FormatLogMetric(root, "jitterMs")} " +
-                $"rttMs={FormatLogMetric(root, "rttMs")}");
     }
 
     private void UpdatePhoneStatistics(JsonElement root)
@@ -440,33 +419,6 @@ public partial class MainWindow : Window
         {
             _viewModel.SenderRoundTripTime = $"{roundTripTime:0.0} ms";
         }
-
-        var phoneBitrate = TryGetNumber(root, "bitrate", out bitrate)
-            ? bitrate
-            : TryGetNumber(root, "bitrateBps", out bitrate)
-                ? bitrate
-                : (double?)null;
-        var phoneRttMs = TryGetNumber(root, "rtt", out roundTripTime)
-            ? roundTripTime * 1000
-            : (double?)null;
-        _viewModel.LogReceivedStatistics(
-            "iPhone",
-            $"captureFPS={FormatLogMetric(root, "captureFPS", "captureFps")} " +
-                $"encodeFPS={FormatLogMetric(root, "encodeFPS", "encodeFps")} " +
-                $"sentBitrateBps={(phoneBitrate is { } sentBitrate ? StreamingControlViewModel.FormatLogNumber(sentBitrate) : "n/a")} " +
-                $"packetsLost={FormatLogMetric(root, "packetsLost")} " +
-                $"rttMs={(phoneRttMs is { } rtt ? StreamingControlViewModel.FormatLogNumber(rtt) : "n/a")}");
-    }
-
-    private static string FormatLogMetric(JsonElement root, string propertyName, string? alternateName = null)
-    {
-        if (!TryGetNumber(root, propertyName, out var value) &&
-            (alternateName is null || !TryGetNumber(root, alternateName, out value)))
-        {
-            return "n/a";
-        }
-
-        return StreamingControlViewModel.FormatLogNumber(value);
     }
 
     private void ClearCapabilities()
@@ -500,7 +452,7 @@ public partial class MainWindow : Window
         }
 
         _viewModel.ConnectionStatus = $"{source}: {state}";
-        _viewModel.AddVideoDiagnostic(source, $"Trạng thái kết nối: {state}.");
+        _viewModel.AddVideoDiagnostic(source, $"Connection state: {state}.");
         if (state.Equals("connected", StringComparison.OrdinalIgnoreCase))
         {
             _viewModel.IsStreaming = true;
@@ -680,7 +632,7 @@ public partial class MainWindow : Window
         var code = TryGetString(root, "code", out var errorCode) ? $"{errorCode}: " : string.Empty;
         var message = TryGetString(root, "message", out var errorMessage)
             ? errorMessage
-            : "Lỗi không có thông tin chi tiết.";
+            : "Error with no details.";
         return code + message;
     }
 
@@ -718,12 +670,12 @@ public partial class MainWindow : Window
         try
         {
             await _signalingServer.SendAsync(payload);
-            _viewModel.AddVideoDiagnostic("signaling", $"Đã gửi {messageType} từ WebView tới iPhone.");
+            _viewModel.AddVideoDiagnostic("signaling", $"Sent {messageType} from WebView to iPhone.");
         }
         catch (Exception exception) when (
             exception is InvalidOperationException or IOException or SocketException)
         {
-            _viewModel.LastError = $"Không gửi được signaling: {exception.Message}";
+            _viewModel.LastError = $"Could not send signaling message: {exception.Message}";
             _viewModel.AddVideoDiagnostic("signaling-error", _viewModel.LastError);
         }
     }
@@ -738,7 +690,7 @@ public partial class MainWindow : Window
         catch (Exception exception) when (
             exception is InvalidOperationException or IOException or SocketException)
         {
-            _viewModel.LastError = $"Không gửi được lệnh tới iPhone: {exception.Message}";
+            _viewModel.LastError = $"Could not send command to iPhone: {exception.Message}";
         }
     }
 
@@ -752,7 +704,7 @@ public partial class MainWindow : Window
         await SendControlMessageAsync(new { type = "START" });
         VideoPlayer.StartConnection();
         _viewModel.IsStreaming = true;
-        _viewModel.ConnectionStatus = "Đã gửi yêu cầu bắt đầu stream";
+        _viewModel.ConnectionStatus = "Stream start request sent";
     }
 
     private async void StopButton_Click(object sender, RoutedEventArgs e)
@@ -880,7 +832,7 @@ public partial class MainWindow : Window
         var scriptPath = Path.Combine(AppContext.BaseDirectory, "SetupFirewall.ps1");
         if (!File.Exists(scriptPath))
         {
-            _viewModel.LastError = $"Không tìm thấy script cấu hình firewall: {scriptPath}";
+            _viewModel.LastError = $"Firewall setup script not found: {scriptPath}";
             return;
         }
 
@@ -897,15 +849,15 @@ public partial class MainWindow : Window
             startInfo.ArgumentList.Add("-File");
             startInfo.ArgumentList.Add(scriptPath);
             Process.Start(startInfo);
-            _viewModel.LastError = "Đã yêu cầu quyền Administrator. Quy tắc chỉ áp dụng cho mạng Private/Domain.";
+            _viewModel.LastError = "Administrator permission requested. Rules apply only to Private/Domain networks.";
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
         {
-            _viewModel.LastError = "Bạn đã hủy yêu cầu quyền Administrator; firewall không thay đổi.";
+            _viewModel.LastError = "You canceled the Administrator permission request; the firewall was not changed.";
         }
         catch (Win32Exception exception)
         {
-            _viewModel.LastError = $"Không thể mở yêu cầu quyền Administrator: {exception.Message}";
+            _viewModel.LastError = $"Could not request Administrator permission: {exception.Message}";
         }
     }
 
