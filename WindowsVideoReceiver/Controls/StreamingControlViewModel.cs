@@ -1,6 +1,9 @@
 using System.ComponentModel;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Windows.Media;
+using WindowsVideoReceiver.Monitoring;
 
 namespace WindowsVideoReceiver.Controls;
 
@@ -68,32 +71,72 @@ public sealed class StreamingControlViewModel : INotifyPropertyChanged
     public string ReceiveFps
     {
         get => _receiveFps;
-        set => SetProperty(ref _receiveFps, value);
+        set
+        {
+            if (SetProperty(ref _receiveFps, value))
+            {
+                OnPropertyChanged(nameof(ReceiveFpsForeground));
+            }
+        }
     }
+
+    public Brush ReceiveFpsForeground => GetFpsForeground(ReceiveFps);
 
     public string DecodeFps
     {
         get => _decodeFps;
-        set => SetProperty(ref _decodeFps, value);
+        set
+        {
+            if (SetProperty(ref _decodeFps, value))
+            {
+                OnPropertyChanged(nameof(DecodeFpsForeground));
+            }
+        }
     }
+
+    public Brush DecodeFpsForeground => GetFpsForeground(DecodeFps);
 
     public string RenderFps
     {
         get => _renderFps;
-        set => SetProperty(ref _renderFps, value);
+        set
+        {
+            if (SetProperty(ref _renderFps, value))
+            {
+                OnPropertyChanged(nameof(RenderFpsForeground));
+            }
+        }
     }
+
+    public Brush RenderFpsForeground => GetFpsForeground(RenderFps);
 
     public string CaptureFps
     {
         get => _captureFps;
-        set => SetProperty(ref _captureFps, value);
+        set
+        {
+            if (SetProperty(ref _captureFps, value))
+            {
+                OnPropertyChanged(nameof(CaptureFpsForeground));
+            }
+        }
     }
+
+    public Brush CaptureFpsForeground => GetFpsForeground(CaptureFps);
 
     public string EncodeFps
     {
         get => _encodeFps;
-        set => SetProperty(ref _encodeFps, value);
+        set
+        {
+            if (SetProperty(ref _encodeFps, value))
+            {
+                OnPropertyChanged(nameof(EncodeFpsForeground));
+            }
+        }
     }
+
+    public Brush EncodeFpsForeground => GetFpsForeground(EncodeFps);
 
     public string Bitrate
     {
@@ -245,6 +288,7 @@ public sealed class StreamingControlViewModel : INotifyPropertyChanged
     public void AddVideoDiagnostic(string stage, string message)
     {
         var entry = $"{DateTime.Now:HH:mm:ss} [{stage}] {message.ReplaceLineEndings(" ")}";
+        FileLogger.WriteDiagnostic(stage, message);
         _videoDiagnosticEntries.Enqueue(entry);
         while (_videoDiagnosticEntries.Count > 100)
         {
@@ -268,6 +312,21 @@ public sealed class StreamingControlViewModel : INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    private static Brush GetFpsForeground(string fps)
+    {
+        var valueText = fps.Split(' ', 2)[0];
+        if (!double.TryParse(valueText, NumberStyles.Float, CultureInfo.CurrentCulture, out var value))
+        {
+            return Brushes.White;
+        }
+
+        return value < 100
+            ? Brushes.Red
+            : value <= 120
+                ? Brushes.Yellow
+                : Brushes.White;
+    }
 }
 
 public sealed record ResolutionOption(int Width, int Height)

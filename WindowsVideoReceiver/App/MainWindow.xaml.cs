@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using WindowsVideoReceiver.Controls;
+using WindowsVideoReceiver.Monitoring;
 using WindowsVideoReceiver.Network;
 using Microsoft.Web.WebView2.Core;
 
@@ -31,6 +32,19 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = _viewModel;
 
+        FileLogger.WriteFailed += message => _viewModel.LastError = message;
+        try
+        {
+            FileLogger.Initialize();
+            FileLogger.WriteDiagnostic("application", "Receiver application started.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            var error = $"Could not initialize application logs: {exception.Message}";
+            Debug.WriteLine(error);
+            _viewModel.LastError = error;
+        }
+
         VideoPlayer.StatusChanged += (_, status) => _viewModel.BridgeStatus = status;
         VideoPlayer.MessageReceived += (_, message) => HandleReceiverMessage(message);
 
@@ -39,6 +53,7 @@ public partial class MainWindow : Window
             Dispatcher.Invoke(() =>
             {
                 _viewModel.ConnectionStatus = state;
+                FileLogger.WriteDiagnostic("signaling", state);
                 _viewModel.IsSignalingConnected = state.StartsWith(
                     "iPhone connected",
                     StringComparison.OrdinalIgnoreCase);
@@ -140,6 +155,7 @@ public partial class MainWindow : Window
 
             if (messageType == "STATS")
             {
+                FileLogger.WriteStatistics("receiver", root);
                 UpdateReceiverStatistics(root);
                 return;
             }
@@ -186,6 +202,15 @@ public partial class MainWindow : Window
             if (messageType != "STATS")
             {
                 _viewModel.AddVideoDiagnostic("iPhone-signaling", $"Received {messageType} from iPhone.");
+            }
+            else
+            {
+                FileLogger.WriteStatistics("iPhone", root);
+            }
+
+            if (messageType is "CAPABILITIES" or "CONFIG_APPLIED")
+            {
+                FileLogger.WriteConfiguration("iPhone", messageType, root);
             }
 
             switch (messageType)

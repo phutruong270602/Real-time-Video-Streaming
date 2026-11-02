@@ -91,14 +91,14 @@
                     <TextBlock Text="Performance Monitoring" Foreground="White"
                                FontSize="17" FontWeight="SemiBold" Margin="0,0,0,16" />
                     <TextBlock Text="Receive FPS" Foreground="#94A3B8" />
-                    <TextBlock Text="{Binding ReceiveFps}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="{Binding ReceiveFps}" Foreground="{Binding ReceiveFpsForeground}" FontSize="22" Margin="0,2,0,10" />
                     <TextBlock Text="Decode FPS" Foreground="#94A3B8" />
-                    <TextBlock Text="{Binding DecodeFps}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="{Binding DecodeFps}" Foreground="{Binding DecodeFpsForeground}" FontSize="22" Margin="0,2,0,10" />
                     <TextBlock Text="Render FPS" Foreground="#94A3B8" />
-                    <TextBlock Text="{Binding RenderFps}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
+                    <TextBlock Text="{Binding RenderFps}" Foreground="{Binding RenderFpsForeground}" FontSize="22" Margin="0,2,0,10" />
                     <TextBlock Text="Capture / Encode FPS (iPhone)" Foreground="#94A3B8" />
                     <TextBlock Foreground="White" FontSize="18" Margin="0,2,0,10">
-                        <Run Text="{Binding CaptureFps}" /><Run Text=" / " /><Run Text="{Binding EncodeFps}" />
+                        <Run Text="{Binding CaptureFps}" Foreground="{Binding CaptureFpsForeground}" /><Run Text=" / " /><Run Text="{Binding EncodeFps}" Foreground="{Binding EncodeFpsForeground}" />
                     </TextBlock>
                     <TextBlock Text="Receiver bitrate" Foreground="#94A3B8" />
                     <TextBlock Text="{Binding Bitrate}" Foreground="White" FontSize="22" Margin="0,2,0,10" />
