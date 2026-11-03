@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -14,7 +13,7 @@ internal sealed class RtspStatisticsClient : IDisposable
     private readonly object _sync = new();
     private CancellationTokenSource? _cancellation;
 
-    public event Action<RtspSenderStatistics, double>? StatisticsReceived;
+    public event Action<RtspSenderStatistics>? StatisticsReceived;
     public event Action<string>? StatusChanged;
 
     public void Start(Uri streamUri)
@@ -63,7 +62,6 @@ internal sealed class RtspStatisticsClient : IDisposable
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                var elapsed = Stopwatch.StartNew();
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(2));
                 try
@@ -79,7 +77,7 @@ internal sealed class RtspStatisticsClient : IDisposable
                     }
 
                     missedResponses = 0;
-                    StatisticsReceived?.Invoke(statistics, elapsed.Elapsed.TotalMilliseconds);
+                    StatisticsReceived?.Invoke(statistics);
                     StatusChanged?.Invoke($"Receiving live RTSP statistics from {address}.");
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -118,17 +116,10 @@ internal sealed record RtspSenderStatistics(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("captureFps")] double CaptureFps,
     [property: JsonPropertyName("encodeFps")] double EncodeFps,
-    [property: JsonPropertyName("senderBitrateBps")] double SenderBitrateBps,
-    [property: JsonPropertyName("packetLossPercent")] double? PacketLossPercent,
-    [property: JsonPropertyName("senderPacketsLost")] int? SenderPacketsLost,
-    [property: JsonPropertyName("jitterMs")] double? JitterMs,
-    [property: JsonPropertyName("senderRttMs")] double? SenderRttMs)
+    [property: JsonPropertyName("senderBitrateBps")] double SenderBitrateBps)
 {
     public bool HasValidValues =>
         double.IsFinite(CaptureFps) &&
         double.IsFinite(EncodeFps) &&
-        double.IsFinite(SenderBitrateBps) &&
-        (PacketLossPercent is null || double.IsFinite(PacketLossPercent.Value)) &&
-        (JitterMs is null || double.IsFinite(JitterMs.Value)) &&
-        (SenderRttMs is null || double.IsFinite(SenderRttMs.Value));
+        double.IsFinite(SenderBitrateBps);
 }

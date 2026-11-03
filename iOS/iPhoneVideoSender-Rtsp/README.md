@@ -22,13 +22,10 @@ RTSP URL. Both devices must be on the same LAN, and Windows must allow inbound
 UDP `8555` on its Private/Domain profile. Guest Wi-Fi, VPN routing, or wireless
 client isolation can still prevent broadcast discovery.
 The sender provides live capture/encode FPS and transmitted bitrate through a
-statistics request/reply endpoint on UDP port `8556`. Receiver packet loss,
-cumulative sender packet loss, jitter, and sender RTT are taken from RTCP
-receiver reports. UDP RTP uses server port `5004` and RTCP uses port `5005`;
-RTCP is also carried on the negotiated interleaved channel when TCP is selected.
-The Windows receiver measures receiver RTT by timing the statistics
-request/reply. If UDP setup fails because port `5004` is unavailable, select
-TCP in the Windows receiver.
+statistics request/reply endpoint on UDP port `8556`. RTCP sender reports are
+still used for the RTSP stream, but packet-loss, jitter, and RTT metrics are not
+included in statistics responses. If UDP setup fails because port `5004` is
+unavailable, select TCP in the Windows receiver.
 
 The default video output is `960 × 1080`, center-cropped from the camera's
 `1920 × 1080` capture format. Other available resolutions depend on the

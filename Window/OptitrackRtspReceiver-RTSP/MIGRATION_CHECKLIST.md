@@ -64,9 +64,7 @@ Mục tiêu: xây dựng một receiver C++ độc lập tại
 - [x] Cấu hình timeout, reconnect/delay và giới hạn packet queue qua các trường
   cấu hình.
 - [x] Gửi capture/encode FPS và bitrate thực từ iPhone RTSP sender qua UDP 8556;
-  dùng RTCP receiver reports để đo loss, jitter và sender RTT; client đo receiver
-  RTT theo thời gian request/response. RTSP nguồn không hỗ trợ telemetry vẫn
-  hiển thị `--` cho các chỉ số không có dữ liệu, không dùng số giả.
+  không gửi hoặc hiển thị packet loss, jitter và RTT trong phần thống kê.
 
 ### Giai đoạn 3 - Kiểm thử receiver độc lập
 

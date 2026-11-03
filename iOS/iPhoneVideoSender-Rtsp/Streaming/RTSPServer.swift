@@ -56,11 +56,6 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private var previousEncodedFramesForStatistics: UInt64 = 0
     private var previousSentBytesForStatistics: UInt64 = 0
     private var statisticsSampleDate = Date()
-    private var receiverPacketLossPercent: Double?
-    private var senderPacketsLost: Int?
-    private var jitterMs: Double?
-    private var senderRoundTripTimeMs: Double?
-    private var senderReportDates: [UInt32: Date] = [:]
     private var nalLengthFieldBytes = 4
     private var isPlaying = false
     private var configuredServerAddress = RTSPServer.localIPv4Address() ?? "0.0.0.0"
@@ -500,11 +495,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             type: "STATS",
             captureFps: captureFps,
             encodeFps: encodeFps,
-            senderBitrateBps: bitrateBps,
-            packetLossPercent: receiverPacketLossPercent,
-            senderPacketsLost: senderPacketsLost,
-            jitterMs: jitterMs,
-            senderRttMs: senderRoundTripTimeMs
+            senderBitrateBps: bitrateBps
         )
     }
 
@@ -520,77 +511,6 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         statisticsLock.unlock()
         rtpPacketCount = 0
         rtpOctetCount = 0
-        receiverPacketLossPercent = nil
-        senderPacketsLost = nil
-        jitterMs = nil
-        senderRoundTripTimeMs = nil
-        senderReportDates.removeAll()
-    }
-
-    private func receiveRtcp(from connection: NWConnection) {
-        connection.receiveMessage { [weak self, weak connection] data, _, isComplete, error in
-            guard let self, let connection,
-                  self.udpRtcpConnection === connection else { return }
-            if let error {
-                AppLogger.warning(
-                    "RTCP receive failed: \(error.localizedDescription)",
-                    category: "RTSP"
-                )
-                return
-            }
-            if let data, !data.isEmpty {
-                self.processRtcpPacket(data)
-            }
-            if !isComplete {
-                self.receiveRtcp(from: connection)
-            }
-        }
-    }
-
-    private func processRtcpPacket(_ packet: Data) {
-        let bytes = [UInt8](packet)
-        var offset = 0
-        while offset + 4 <= bytes.count {
-            let header = bytes[offset]
-            let packetType = bytes[offset + 1]
-            let packetLength = ((Int(bytes[offset + 2]) << 8 | Int(bytes[offset + 3])) + 1) * 4
-            guard header >> 6 == 2,
-                  packetLength >= 4,
-                  offset + packetLength <= bytes.count else {
-                return
-            }
-
-            if packetType == 201 {
-                let reportCount = Int(header & 0x1f)
-                guard packetLength >= 8 + reportCount * 24 else {
-                    offset += packetLength
-                    continue
-                }
-                for index in 0 ..< reportCount {
-                    let blockOffset = offset + 8 + index * 24
-                    guard readUInt32(bytes, at: blockOffset) == ssrc else { continue }
-                    let fractionLost = Double(bytes[blockOffset + 4])
-                    var lost = (Int(bytes[blockOffset + 5]) << 16)
-                        | (Int(bytes[blockOffset + 6]) << 8)
-                        | Int(bytes[blockOffset + 7])
-                    if lost & 0x80_0000 != 0 {
-                        lost |= ~0xff_ffff
-                    }
-                    let jitter = readUInt32(bytes, at: blockOffset + 12)
-                    let lastSenderReport = readUInt32(bytes, at: blockOffset + 16)
-                    let delaySinceLastSenderReport = readUInt32(bytes, at: blockOffset + 20)
-                    receiverPacketLossPercent = fractionLost * 100 / 256
-                    senderPacketsLost = max(0, lost)
-                    jitterMs = Double(jitter) * 1000 / 90_000
-                    if let reportDate = senderReportDates[lastSenderReport] {
-                        let roundTripSeconds = Date().timeIntervalSince(reportDate)
-                            - Double(delaySinceLastSenderReport) / 65_536
-                        senderRoundTripTimeMs = max(0, roundTripSeconds * 1000)
-                    }
-                }
-            }
-            offset += packetLength
-        }
     }
 
     private func startSenderReportTimer() {
@@ -616,7 +536,6 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         let fractionalSeconds = UInt32(
             (unixTime.truncatingRemainder(dividingBy: 1) * 4_294_967_296).rounded(.down)
         )
-        let compactNtp = (seconds << 16) | (fractionalSeconds >> 16)
         var report = Data([0x80, 200, 0, 6])
         appendUInt32(ssrc, to: &report)
         appendUInt32(seconds, to: &report)
@@ -624,12 +543,6 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         appendUInt32(lastRtpTimestamp, to: &report)
         appendUInt32(UInt32(truncatingIfNeeded: rtpPacketCount), to: &report)
         appendUInt32(UInt32(truncatingIfNeeded: rtpOctetCount), to: &report)
-        senderReportDates[compactNtp] = Date()
-        if senderReportDates.count > 16,
-           let oldest = senderReportDates.min(by: { $0.value < $1.value })?.key {
-            senderReportDates.removeValue(forKey: oldest)
-        }
-
         switch transport {
         case .tcp(let channel):
             guard let client else { return }
@@ -655,13 +568,6 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         case .none:
             break
         }
-    }
-
-    private func readUInt32(_ bytes: [UInt8], at offset: Int) -> UInt32 {
-        (UInt32(bytes[offset]) << 24)
-            | (UInt32(bytes[offset + 1]) << 16)
-            | (UInt32(bytes[offset + 2]) << 8)
-            | UInt32(bytes[offset + 3])
     }
 
     private func appendUInt32(_ value: UInt32, to data: inout Data) {
@@ -736,18 +642,10 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         while !clientBuffer.isEmpty {
             if clientBuffer.first == 0x24 {
                 guard clientBuffer.count >= 4 else { return }
-                let channel = clientBuffer[clientBuffer.startIndex + 1]
                 let interleavedLength = Int(clientBuffer[clientBuffer.startIndex + 2]) << 8
                     | Int(clientBuffer[clientBuffer.startIndex + 3])
                 let frameLength = 4 + interleavedLength
                 guard clientBuffer.count >= frameLength else { return }
-                if case let .tcp(rtpChannel) = transport,
-                   channel == (rtpChannel &+ 1) {
-                    let packet = clientBuffer.subdata(
-                        in: clientBuffer.startIndex + 4 ..< clientBuffer.startIndex + frameLength
-                    )
-                    processRtcpPacket(packet)
-                }
                 clientBuffer.removeSubrange(clientBuffer.startIndex ..< clientBuffer.startIndex + frameLength)
                 continue
             }
@@ -970,11 +868,9 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             guard let self, let rtcpConnection,
                   self.udpRtcpConnection === rtcpConnection else { return }
             switch state {
-            case .ready:
-                self.receiveRtcp(from: rtcpConnection)
             case .failed(let error):
                 AppLogger.warning(
-                    "RTCP receive connection failed: \(error.localizedDescription)",
+                    "RTCP connection failed: \(error.localizedDescription)",
                     category: "RTSP"
                 )
             default:
@@ -1553,10 +1449,6 @@ private struct RTSPStatisticsMessage: Encodable {
     let captureFps: Double
     let encodeFps: Double
     let senderBitrateBps: Double
-    let packetLossPercent: Double?
-    let senderPacketsLost: Int?
-    let jitterMs: Double?
-    let senderRttMs: Double?
 }
 
 private func rtspCompressionOutputCallback(

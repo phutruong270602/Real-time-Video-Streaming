@@ -8,9 +8,6 @@ internal sealed class NativeRtspReceiver : IDisposable
     private const string LibraryName = "OptitrackRtspNative.dll";
     private readonly object _sync = new();
     private IntPtr _handle;
-    private IntPtr _frameBuffer;
-    private int _frameBufferCapacity;
-    private byte[] _managedFrameBuffer = Array.Empty<byte>();
     private ulong _lastFrameSequence;
 
     public NativeRtspReceiver()
@@ -79,70 +76,92 @@ internal sealed class NativeRtspReceiver : IDisposable
         }
     }
 
-    public bool TryGetFrame(out byte[] pixels, out int width, out int height, out int stride, out ulong sequence)
+    public bool TryGetFrameInfo(
+        out int width,
+        out int height,
+        out int stride,
+        out ulong sequence,
+        out int requiredBytes)
     {
-        pixels = Array.Empty<byte>();
         width = 0;
         height = 0;
         stride = 0;
         sequence = 0;
         long timestampMs = 0;
-        var requiredBytes = 0;
 
         lock (_sync)
         {
-            for (var attempt = 0; attempt < 3; attempt++)
-            {
-                if (NativeMethods.GetFrame(
-                        _handle,
-                        IntPtr.Zero,
-                        0,
-                        out width,
-                        out height,
-                        out stride,
-                        out sequence,
-                        out timestampMs,
-                        out requiredBytes) == 0 ||
-                    requiredBytes <= 0 ||
-                    width <= 0 ||
-                    height <= 0 ||
-                    stride < (long)width * 4 ||
-                    requiredBytes != (long)stride * height ||
-                    requiredBytes > 256 * 1024 * 1024)
-                {
-                    return false;
-                }
-                if (sequence == _lastFrameSequence)
-                {
-                    return false;
-                }
+            var result = NativeMethods.GetFrame(
+                _handle,
+                IntPtr.Zero,
+                0,
+                out width,
+                out height,
+                out stride,
+                out sequence,
+                out timestampMs,
+                out requiredBytes);
+            return result == 2 && IsValidFrame(width, height, stride, requiredBytes);
+        }
+    }
 
-                EnsureFrameBuffer(requiredBytes);
-                var result = NativeMethods.GetFrame(
+    public bool TryCopyFrameTo(
+        IntPtr destination,
+        int destinationCapacity,
+        int expectedWidth,
+        int expectedHeight,
+        int expectedStride,
+        out ulong sequence)
+    {
+        sequence = 0;
+        if (destination == IntPtr.Zero || destinationCapacity <= 0)
+        {
+            return false;
+        }
+
+        lock (_sync)
+        {
+            if (NativeMethods.GetFrame(
                     _handle,
-                    _frameBuffer,
-                    _frameBufferCapacity,
-                    out width,
-                    out height,
-                    out stride,
-                    out sequence,
-                    out timestampMs,
-                    out requiredBytes);
-                if (result == 1 && requiredBytes <= _frameBufferCapacity)
-                {
-                    if (_managedFrameBuffer.Length != requiredBytes)
-                    {
-                        _managedFrameBuffer = new byte[requiredBytes];
-                    }
-
-                    Marshal.Copy(_frameBuffer, _managedFrameBuffer, 0, requiredBytes);
-                    pixels = _managedFrameBuffer;
-                    _lastFrameSequence = sequence;
-                    return true;
-                }
+                    IntPtr.Zero,
+                    0,
+                    out var width,
+                    out var height,
+                    out var stride,
+                    out var currentSequence,
+                    out var timestampMs,
+                    out var requiredBytes) != 2 ||
+                !IsValidFrame(width, height, stride, requiredBytes) ||
+                width != expectedWidth ||
+                height != expectedHeight ||
+                stride != expectedStride ||
+                requiredBytes > destinationCapacity ||
+                currentSequence == _lastFrameSequence)
+            {
+                return false;
             }
 
-            return false;
+            var result = NativeMethods.GetFrame(
+                _handle,
+                destination,
+                destinationCapacity,
+                out width,
+                out height,
+                out stride,
+                out sequence,
+                out timestampMs,
+                out requiredBytes);
+            if (result != 1 ||
+                width != expectedWidth ||
+                height != expectedHeight ||
+                stride != expectedStride ||
+                requiredBytes > destinationCapacity)
+            {
+                return false;
+            }
+
+            _lastFrameSequence = sequence;
+            return true;
         }
     }
 
@@ -155,32 +174,16 @@ internal sealed class NativeRtspReceiver : IDisposable
                 NativeMethods.Destroy(_handle);
                 _handle = IntPtr.Zero;
             }
-
-            if (_frameBuffer != IntPtr.Zero)
-            {
-                Marshal.FreeHGlobal(_frameBuffer);
-                _frameBuffer = IntPtr.Zero;
-                _frameBufferCapacity = 0;
-            }
         }
     }
 
-    private void EnsureFrameBuffer(int requiredBytes)
-    {
-        if (requiredBytes <= _frameBufferCapacity)
-        {
-            return;
-        }
-
-        var replacement = Marshal.AllocHGlobal(requiredBytes);
-        if (_frameBuffer != IntPtr.Zero)
-        {
-            Marshal.FreeHGlobal(_frameBuffer);
-        }
-
-        _frameBuffer = replacement;
-        _frameBufferCapacity = requiredBytes;
-    }
+    private static bool IsValidFrame(int width, int height, int stride, int requiredBytes) =>
+        requiredBytes > 0 &&
+        width > 0 &&
+        height > 0 &&
+        stride >= (long)width * 4 &&
+        requiredBytes == (long)stride * height &&
+        requiredBytes <= 256 * 1024 * 1024;
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct NativeStats

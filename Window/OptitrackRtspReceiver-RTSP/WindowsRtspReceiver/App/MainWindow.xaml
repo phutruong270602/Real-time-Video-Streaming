@@ -103,12 +103,6 @@
                                  ToolTip="Select a discovered iPhone to fill in its RTSP URL." />
                         <TextBlock Text="{Binding ControlStatus}" Foreground="#CBD5E1"
                                    TextWrapping="Wrap" Margin="0,0,0,12" />
-                        <TextBlock Text="Both devices must be on the same Wi-Fi. Discovery uses UDP broadcast port 8555; guest Wi-Fi or firewall isolation can block it."
-                                   Foreground="#FBBF24" TextWrapping="Wrap" Margin="0,0,0,12" />
-                        <Button Content="Allow discovery through Windows Firewall"
-                                Margin="0,0,0,12" Padding="8,6"
-                                Click="ConfigureFirewallButton_Click"
-                                ToolTip="Adds an inbound UDP 8555 rule restricted to the local subnet. Administrator approval is required." />
                         <TextBlock Text="RTSP URL" Foreground="#CBD5E1" />
                         <TextBox x:Name="RtspUrlTextBox" Margin="0,6,0,12"
                                  Padding="8" Text="rtsp://" />
@@ -159,7 +153,7 @@
                     <TextBlock Text="{Binding Codec}" Foreground="White" />
                     <TextBlock Text="RTSP source" Foreground="#CBD5E1"
                                FontWeight="SemiBold" Margin="0,14,0,4" />
-                    <TextBlock Text="For live source statistics, use the iPhone RTSP sender. It provides telemetry over UDP 8556; loss, jitter and sender RTT are measured from RTCP receiver reports."
+                    <TextBlock Text="The iPhone RTSP sender can provide capture FPS, encode FPS, and bitrate over UDP 8556."
                                Foreground="#94A3B8" TextWrapping="Wrap" />
                     <TextBlock Text="Video diagnostics" Foreground="#CBD5E1"
                                FontWeight="SemiBold" Margin="0,18,0,4" />
@@ -195,21 +189,6 @@
                                FontSize="22" Margin="0,2,0,12" />
                     <TextBlock Text="Sender bitrate (source)" Foreground="#94A3B8" />
                     <TextBlock Text="{Binding SenderBitrate}" Foreground="White"
-                               TextWrapping="Wrap" Margin="0,2,0,12" />
-                    <TextBlock Text="Receiver packet loss" Foreground="#94A3B8" />
-                    <TextBlock Text="{Binding PacketLoss}" Foreground="White"
-                               TextWrapping="Wrap" Margin="0,2,0,12" />
-                    <TextBlock Text="Sender packets lost" Foreground="#94A3B8" />
-                    <TextBlock Text="{Binding SenderPacketLoss}" Foreground="White"
-                               TextWrapping="Wrap" Margin="0,2,0,12" />
-                    <TextBlock Text="Jitter" Foreground="#94A3B8" />
-                    <TextBlock Text="{Binding Jitter}" Foreground="White"
-                               TextWrapping="Wrap" Margin="0,2,0,12" />
-                    <TextBlock Text="Receiver RTT" Foreground="#94A3B8" />
-                    <TextBlock Text="{Binding RoundTripTime}" Foreground="White"
-                               TextWrapping="Wrap" Margin="0,2,0,12" />
-                    <TextBlock Text="Sender RTT" Foreground="#94A3B8" />
-                    <TextBlock Text="{Binding SenderRoundTripTime}" Foreground="White"
                                TextWrapping="Wrap" Margin="0,2,0,12" />
                     <TextBlock Text="Packets received" Foreground="#94A3B8" />
                     <TextBlock Text="{Binding PacketsReceived}" Foreground="White"

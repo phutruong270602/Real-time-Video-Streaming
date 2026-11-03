@@ -41,6 +41,7 @@ find_library(AVSWSCALE_LIBRARY
 )
 
 add_library(optitrack_rtsp_receiver
+    src/Logger.cpp
     src/RtspReceiver.cpp
 )
 add_library(OptitrackRtspReceiver::receiver ALIAS optitrack_rtsp_receiver)
@@ -50,6 +51,9 @@ target_include_directories(optitrack_rtsp_receiver
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 target_include_directories(optitrack_rtsp_receiver SYSTEM PRIVATE "${FFMPEG_INCLUDE_DIR}")
+target_compile_definitions(optitrack_rtsp_receiver PRIVATE
+    "OPTITRACK_RTSP_CPP_LOG_FILE=\"${CMAKE_CURRENT_SOURCE_DIR}/log/rtsp_receiver_cpp.log\""
+)
 target_link_libraries(optitrack_rtsp_receiver
     PUBLIC
         "${AVFORMAT_LIBRARY}"
@@ -86,6 +90,7 @@ target_compile_features(optitrack_rtsp_native PRIVATE cxx_std_17)
 target_compile_definitions(optitrack_rtsp_native PRIVATE
     OPTITRACK_RTSP_NATIVE_EXPORTS
     "OPTITRACK_RTSP_LOG_FILE=\"${CMAKE_CURRENT_SOURCE_DIR}/log/rtsp_receiver.log\""
+    "OPTITRACK_RTSP_DECODED_FRAME_LOG_FILE=\"${CMAKE_CURRENT_SOURCE_DIR}/log/decoded_frames.log\""
 )
 target_include_directories(optitrack_rtsp_native
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"

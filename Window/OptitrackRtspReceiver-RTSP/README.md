@@ -52,22 +52,17 @@ UDP/TCP controls, connection timeout, automatic reconnect and delay, and
 encoded packet queue capacity. **Find iPhone RTSP server** listens for a small
 UDP broadcast announcement on port `8555`, learns the sender IP from the
 datagram, and displays the discovered IPs in a selectable list below the
-button. Selecting an IP fills in the RTSP URL. The iPhone sender must remain
-running on the same Wi-Fi during discovery. Guest-network isolation or a
-firewall blocking UDP broadcast can prevent discovery. Discovery uses UDP port
-`8555`; the RTSP service itself uses TCP port `8554`. Detailed discovery
-diagnostics are written to `log/receiver_ui.log`. The monitor shows an **Allow discovery through Windows
-Firewall** button that requests administrator approval to add an inbound UDP
-`8555` rule limited to the local subnet on any network profile; this RTSP-only
-setup does not open TCP `8080`.
+button. Selecting an IP fills in the RTSP URL. Discovery uses UDP port `8555`;
+the RTSP service itself uses TCP port `8554`. Detailed discovery diagnostics
+are written to `log/receiver_ui.log`.
 When connected to the matching iPhone RTSP sender, the monitor polls its
 statistics endpoint on UDP port `8556`. Capture/encode FPS and transmitted
-bitrate come from the sender; packet loss, jitter and sender RTT come from RTCP
-receiver reports, while receiver RTT is measured by the client. Generic RTSP
-cameras that do not provide this endpoint can still show receiver-side
+bitrate come from the sender. Generic RTSP cameras that do not provide this
+endpoint can still show receiver-side
 connection/codec/resolution, receive/decode/render FPS, bitrate, packet/byte
 counts, queue drops and drop rate, session duration, and diagnostics. Missing
-source/RTCP measurements remain `--` instead of displaying fabricated values.
+source statistics remain unavailable. Packet-loss, jitter, and RTT metrics are
+not shown.
 WebRTC and iPhone source controls are not available in this RTSP-only client. Its build
 automatically configures and builds the native DLL against the x64 FFmpeg SDK.
 The project has a default SDK path; if your SDK is elsewhere, provide its path
@@ -75,12 +70,20 @@ with the `FFmpegRoot` MSBuild property as shown below.
 
 The application always appends startup, control, configuration, and sampled
 statistics to `log/receiver_ui.log`. Native RTSP sessions additionally append
-connection, packet, decode, and error events to `log/rtsp_receiver.log`. RTSP
-start parameters include the selected transport, timeouts, reconnect settings,
-and queue capacity; credentials and URL query strings are omitted from logged
-URLs. The native H.264 decoder is initialized with codec configuration data
-(including SPS/PPS) discovered while opening the RTSP stream. Packet and
-decoded-frame details are sampled on the first item and every 30 items.
+connection, packet, decode, and error events to `log/rtsp_receiver.log`. The
+C++ receiver writes its own lower-level connection and stream lifecycle log to
+`log/rtsp_receiver_cpp.log`, including reconnect attempts, sampled packet
+statistics, queue drops, and failures. RTSP start parameters include the
+selected transport, timeouts, reconnect settings, and queue capacity;
+credentials and URL query strings are omitted from logged URLs. The native
+H.264 decoder is initialized with codec configuration data (including SPS/PPS)
+discovered while opening the RTSP stream. Native packet and decoded-frame
+details are sampled on the first item and every 30 items; C++ receiver packet
+details are sampled on the first packet and every 300 packets. Each decoded
+BGRA frame is also recorded separately in `log/decoded_frames.log`, including
+its sequence, dimensions, timestamp, and buffer size. Each line includes the
+first 16 BGRA bytes (four pixels), both as a byte array and as per-channel
+B/G/R/A values, rather than dumping the entire image buffer.
 
 ```powershell
 dotnet build .\Window\OptitrackRtspReceiver-RTSP\WindowsRtspReceiver\WindowsRtspReceiver.csproj -c Release

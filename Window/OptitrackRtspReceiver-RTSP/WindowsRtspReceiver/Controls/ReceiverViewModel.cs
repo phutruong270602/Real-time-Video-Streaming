@@ -18,11 +18,6 @@ public sealed class ReceiverViewModel : INotifyPropertyChanged
     private string _captureFps = "--";
     private string _encodeFps = "--";
     private string _senderBitrate = "--";
-    private string _packetLoss = "--";
-    private string _senderPacketLoss = "--";
-    private string _jitter = "--";
-    private string _roundTripTime = "--";
-    private string _senderRoundTripTime = "--";
     private string _packetsReceived = "0";
     private string _bytesReceived = "0 B";
     private string _packetsDropped = "0";
@@ -99,11 +94,6 @@ public sealed class ReceiverViewModel : INotifyPropertyChanged
     }
     public Brush EncodeFpsForeground => GetFpsForeground(EncodeFps);
     public string SenderBitrate { get => _senderBitrate; set => SetProperty(ref _senderBitrate, value); }
-    public string PacketLoss { get => _packetLoss; set => SetProperty(ref _packetLoss, value); }
-    public string SenderPacketLoss { get => _senderPacketLoss; set => SetProperty(ref _senderPacketLoss, value); }
-    public string Jitter { get => _jitter; set => SetProperty(ref _jitter, value); }
-    public string RoundTripTime { get => _roundTripTime; set => SetProperty(ref _roundTripTime, value); }
-    public string SenderRoundTripTime { get => _senderRoundTripTime; set => SetProperty(ref _senderRoundTripTime, value); }
     public string PacketsReceived { get => _packetsReceived; set => SetProperty(ref _packetsReceived, value); }
     public string BytesReceived { get => _bytesReceived; set => SetProperty(ref _bytesReceived, value); }
     public string PacketsDropped { get => _packetsDropped; set => SetProperty(ref _packetsDropped, value); }

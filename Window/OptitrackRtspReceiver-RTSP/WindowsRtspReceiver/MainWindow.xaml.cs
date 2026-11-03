@@ -44,10 +44,10 @@ public partial class MainWindow : Window
     private long _previousStatsTimestamp;
     private long _previousRenderTimestamp;
     private long _lastRtspLogTimestamp;
+    private long _lastVideoRenderLogTimestamp;
     private long _lastWebRtcLogTimestamp;
     private long _lastPhoneStatsLogTimestamp;
     private int _renderFrames;
-    private ulong _lastLoggedFrameSequence;
     private string _lastLoggedRtspError = string.Empty;
     private ResolutionOption? _appliedResolution;
     private string? _appliedCamera;
@@ -65,12 +65,12 @@ public partial class MainWindow : Window
         DiscoveredRtspServersListBox.ItemsSource = _discoveredRtspServers;
         ApplyReceiverMode();
         _viewModel.ControlStatus = "RTSP-only mode. Enter a URL from an RTSP server.";
-        _rtspStatisticsClient.StatisticsReceived += (statistics, roundTripTimeMs) =>
+        _rtspStatisticsClient.StatisticsReceived += statistics =>
             Dispatcher.BeginInvoke(() =>
             {
                 if (_rtspStatisticsActive)
                 {
-                    UpdateRtspServerStatistics(statistics, roundTripTimeMs);
+                    UpdateRtspServerStatistics(statistics);
                 }
             });
         _rtspStatisticsClient.StatusChanged += status =>
@@ -84,7 +84,7 @@ public partial class MainWindow : Window
 
         _statisticsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _statisticsTimer.Tick += StatisticsTimer_Tick;
-        _videoTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
+        _videoTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _videoTimer.Tick += VideoTimer_Tick;
         ReceiverLog.Write("APP", $"window_created mode={(IsWebRtcMode ? "WebRTC" : "RTSP")} log_file=\"{ReceiverLog.FilePath}\"");
     }
@@ -331,6 +331,7 @@ public partial class MainWindow : Window
             _displayDroppedBase = 0;
             _previousStatsTimestamp = _renderClock.ElapsedMilliseconds;
             _previousRenderTimestamp = _previousStatsTimestamp;
+            _lastVideoRenderLogTimestamp = _previousStatsTimestamp;
             _renderFrames = 0;
             _sessionClock.Restart();
             _bitmap = null;
@@ -479,30 +480,55 @@ public partial class MainWindow : Window
     private void VideoTimer_Tick(object? sender, EventArgs e)
     {
         if (_receiver is null ||
-            !_receiver.TryGetFrame(out var pixels, out var width, out var height, out var stride, out var sequence) ||
-            sequence == _lastFrameSequence)
+            !_receiver.TryGetFrameInfo(
+                out var width,
+                out var height,
+                out var stride,
+                out var availableSequence,
+                out _) ||
+            availableSequence == _lastFrameSequence)
         {
             return;
         }
 
-        _lastFrameSequence = sequence;
-        if (_lastLoggedFrameSequence == 0 || sequence - _lastLoggedFrameSequence >= 30)
-        {
-            ReceiverLog.Write("VIDEO_RENDER", $"decoded_sequence={sequence} resolution={width}x{height} stride={stride}");
-            _lastLoggedFrameSequence = sequence;
-        }
         if (_bitmap is null || _bitmap.PixelWidth != width || _bitmap.PixelHeight != height)
         {
             _bitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Bgra32, null);
             VideoImage.Source = _bitmap;
         }
 
-        _bitmap.WritePixels(new Int32Rect(0, 0, width, height), pixels, stride, 0);
+        _bitmap.Lock();
+        try
+        {
+            if (!_receiver.TryCopyFrameTo(
+                    _bitmap.BackBuffer,
+                    _bitmap.BackBufferStride * _bitmap.PixelHeight,
+                    width,
+                    height,
+                    stride,
+                    out var sequence))
+            {
+                return;
+            }
+
+            _bitmap.AddDirtyRect(new Int32Rect(0, 0, width, height));
+            _lastFrameSequence = sequence;
+        }
+        finally
+        {
+            _bitmap.Unlock();
+        }
+
         VideoPlaceholder.Visibility = Visibility.Collapsed;
         _viewModel.ConnectionStatus = "Receiving and rendering video";
         _renderFrames++;
 
         var now = _renderClock.ElapsedMilliseconds;
+        if (now - _lastVideoRenderLogTimestamp >= 5000)
+        {
+            ReceiverLog.Write("VIDEO_RENDER", $"decoded_sequence={_lastFrameSequence} resolution={width}x{height} stride={stride}");
+            _lastVideoRenderLogTimestamp = now;
+        }
         var elapsed = now - _previousRenderTimestamp;
         if (elapsed >= 1000)
         {
@@ -634,9 +660,6 @@ public partial class MainWindow : Window
         _viewModel.DecodeFps = "--";
         _viewModel.RenderFps = "--";
         _viewModel.Bitrate = "--";
-        _viewModel.PacketLoss = "--";
-        _viewModel.Jitter = "--";
-        _viewModel.RoundTripTime = "--";
         _viewModel.PacketsReceived = "0";
         _viewModel.BytesReceived = "0 B";
         _viewModel.VideoSize = "--";
@@ -706,18 +729,6 @@ public partial class MainWindow : Window
         {
             _viewModel.Bitrate = $"{bitrate / 1_000_000:0.00} Mbps";
         }
-        if (TryGetNumber(root, "packetLossPercent", out var packetLoss))
-        {
-            _viewModel.PacketLoss = $"{packetLoss:0.00}%";
-        }
-        if (TryGetNumber(root, "jitterMs", out var jitter))
-        {
-            _viewModel.Jitter = $"{jitter:0.0} ms";
-        }
-        if (TryGetNumber(root, "rttMs", out var rtt))
-        {
-            _viewModel.RoundTripTime = $"{rtt:0.0} ms";
-        }
         if (TryGetNumber(root, "packetsReceived", out var packets))
         {
             _viewModel.PacketsReceived = packets.ToString("N0");
@@ -760,40 +771,13 @@ public partial class MainWindow : Window
         {
             _viewModel.SenderBitrate = $"{bitrate / 1_000_000:0.00} Mbps";
         }
-        if (TryGetNumber(root, "packetsLost", out var packetsLost))
-        {
-            _viewModel.SenderPacketLoss = $"{packetsLost:0} packets";
-        }
-        if (TryGetNumber(root, "rtt", out var rtt))
-        {
-            _viewModel.SenderRoundTripTime = $"{rtt:0.0} ms";
-        }
     }
 
-    private void UpdateRtspServerStatistics(
-        RtspSenderStatistics statistics,
-        double receiverRoundTripTimeMs)
+    private void UpdateRtspServerStatistics(RtspSenderStatistics statistics)
     {
         _viewModel.CaptureFps = $"{statistics.CaptureFps:0.0} FPS";
         _viewModel.EncodeFps = $"{statistics.EncodeFps:0.0} FPS";
         _viewModel.SenderBitrate = $"{statistics.SenderBitrateBps / 1_000_000:0.00} Mbps";
-        _viewModel.RoundTripTime = $"{receiverRoundTripTimeMs:0.0} ms";
-        if (statistics.PacketLossPercent is { } packetLossPercent)
-        {
-            _viewModel.PacketLoss = $"{packetLossPercent:0.00}%";
-        }
-        if (statistics.SenderPacketsLost is { } packetsLost)
-        {
-            _viewModel.SenderPacketLoss = $"{packetsLost:N0} packets";
-        }
-        if (statistics.JitterMs is { } jitter)
-        {
-            _viewModel.Jitter = $"{jitter:0.0} ms";
-        }
-        if (statistics.SenderRttMs is { } senderRtt)
-        {
-            _viewModel.SenderRoundTripTime = $"{senderRtt:0.0} ms";
-        }
     }
 
     private void ResetSourceStatistics()
@@ -801,11 +785,6 @@ public partial class MainWindow : Window
         _viewModel.CaptureFps = "--";
         _viewModel.EncodeFps = "--";
         _viewModel.SenderBitrate = "--";
-        _viewModel.SenderPacketLoss = "--";
-        _viewModel.SenderRoundTripTime = "--";
-        _viewModel.PacketLoss = "--";
-        _viewModel.Jitter = "--";
-        _viewModel.RoundTripTime = "--";
     }
 
     private async Task SendSignalingMessageAsync(string payload, string messageType)
@@ -868,7 +847,7 @@ public partial class MainWindow : Window
         _viewModel.Codec = "--";
         MetricsAvailabilityText.Text = useWebRtc
             ? "WebRTC and iPhone source statistics are shown when reported."
-            : "RTSP sender statistics are polled from the iPhone over UDP 8556; loss, jitter and sender RTT use RTCP receiver reports.";
+            : "RTSP sender capture FPS, encode FPS, and bitrate are polled from the iPhone over UDP 8556.";
         if (!useWebRtc)
         {
             ResetSourceStatistics();
@@ -878,11 +857,6 @@ public partial class MainWindow : Window
             _viewModel.CaptureFps = "--";
             _viewModel.EncodeFps = "--";
             _viewModel.SenderBitrate = "--";
-            _viewModel.SenderPacketLoss = "--";
-            _viewModel.SenderRoundTripTime = "--";
-            _viewModel.PacketLoss = "--";
-            _viewModel.Jitter = "--";
-            _viewModel.RoundTripTime = "--";
         }
     }
 
@@ -1278,43 +1252,6 @@ public partial class MainWindow : Window
         {
             _viewModel.LastError = $"Could not send camera control to iPhone: {exception.Message}";
             ReceiverLog.Write("ERROR", _viewModel.LastError);
-        }
-    }
-
-    private void ConfigureFirewallButton_Click(object sender, RoutedEventArgs e)
-    {
-        var scriptPath = System.IO.Path.Combine(AppContext.BaseDirectory, "SetupFirewall.ps1");
-        if (!System.IO.File.Exists(scriptPath))
-        {
-            _viewModel.LastError = $"Firewall setup script not found: {scriptPath}";
-            return;
-        }
-
-        try
-        {
-            var startInfo = new ProcessStartInfo("powershell.exe")
-            {
-                UseShellExecute = true,
-                Verb = "runas"
-            };
-            startInfo.ArgumentList.Add("-NoProfile");
-            startInfo.ArgumentList.Add("-ExecutionPolicy");
-            startInfo.ArgumentList.Add("Bypass");
-            startInfo.ArgumentList.Add("-File");
-            startInfo.ArgumentList.Add(scriptPath);
-            startInfo.ArgumentList.Add("-RtspOnly");
-            Process.Start(startInfo);
-            _viewModel.LastError = string.Empty;
-            _viewModel.Diagnostic = "RTSP discovery firewall setup requested. It allows inbound UDP 8555 only from the local subnet.";
-        }
-        catch (System.ComponentModel.Win32Exception exception) when (exception.NativeErrorCode == 1223)
-        {
-            _viewModel.LastError = "Firewall setup was canceled before administrator approval.";
-        }
-        catch (Exception exception) when (
-            exception is System.ComponentModel.Win32Exception or InvalidOperationException)
-        {
-            _viewModel.LastError = $"Could not configure the LAN firewall: {exception.Message}";
         }
     }
 

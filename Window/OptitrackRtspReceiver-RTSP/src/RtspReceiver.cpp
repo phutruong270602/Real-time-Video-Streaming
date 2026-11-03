@@ -1,4 +1,5 @@
 #include "OptitrackRtspReceiver/RtspReceiver.h"
+#include "Logger.h"
 
 extern "C" {
 #include <libavcodec/codec_id.h>
@@ -36,6 +37,27 @@ bool valid_rtsp_url(const std::string& url)
     return url.rfind("rtsp://", 0) == 0 || url.rfind("rtsps://", 0) == 0;
 }
 
+std::string safe_url(const std::string& url)
+{
+    std::string result = url;
+    const auto query_start = result.find_first_of("?#");
+    if (query_start != std::string::npos) {
+        result.erase(query_start);
+    }
+
+    const auto authority_start = result.find("://");
+    if (authority_start != std::string::npos) {
+        const auto host_start = authority_start + 3;
+        const auto host_end = result.find('/', host_start);
+        const auto authority_end = host_end == std::string::npos ? result.size() : host_end;
+        const auto credentials_end = result.rfind('@', authority_end);
+        if (credentials_end != std::string::npos && credentials_end >= host_start) {
+            result.replace(host_start, credentials_end - host_start, "***");
+        }
+    }
+    return result;
+}
+
 } // namespace
 
 struct RtspReceiver::OpenedStream {
@@ -55,6 +77,12 @@ bool RtspReceiver::start(const ReceiverOptions& options, std::string& error)
     const auto generation = cancellation_generation_.load();
     stop_locked();
     error.clear();
+    detail::log_info("Start requested url=" + safe_url(options.url) +
+        " transport=" + (options.transport == Transport::Tcp ? "tcp" : "udp") +
+        " queue_capacity=" + std::to_string(options.queue_capacity) +
+        " network_timeout_ms=" + std::to_string(options.network_timeout.count()) +
+        " reconnect=" + (options.reconnect ? "true" : "false") +
+        " reconnect_delay_ms=" + std::to_string(options.reconnect_delay.count()));
 
     {
         std::lock_guard<std::mutex> queue_lock(queue_mutex_);
@@ -104,6 +132,7 @@ bool RtspReceiver::start(const ReceiverOptions& options, std::string& error)
         stop_requested_ = true;
         return false;
     }
+    detail::log_info("FFmpeg network initialized");
 
     OpenedStream stream;
     if (!open_stream(stream, error)) {
@@ -140,12 +169,18 @@ bool RtspReceiver::start(const ReceiverOptions& options, std::string& error)
         return false;
     }
 
+    const auto started_stream_info = stream_info();
+    detail::log_info("Receiver started codec=" + started_stream_info.codec_name +
+        " resolution=" + std::to_string(started_stream_info.width) + "x" +
+        std::to_string(started_stream_info.height) +
+        " stream_index=" + std::to_string(started_stream_info.stream_index));
     error.clear();
     return true;
 }
 
 void RtspReceiver::stop()
 {
+    detail::log_info("Stop requested");
     cancellation_generation_++;
     stop_requested_ = true;
     reconnect_changed_.notify_all();
@@ -157,6 +192,7 @@ void RtspReceiver::stop()
 
 void RtspReceiver::stop_locked()
 {
+    const bool was_active = running_ || connected_ || worker_.joinable();
     stop_requested_ = true;
     reconnect_changed_.notify_all();
     queue_changed_.notify_all();
@@ -167,6 +203,12 @@ void RtspReceiver::stop_locked()
 
     connected_ = false;
     running_ = false;
+    if (was_active) {
+        detail::log_info("Receiver stopped packets_received=" +
+            std::to_string(packets_received_.load()) +
+            " bytes_received=" + std::to_string(bytes_received_.load()) +
+            " packets_dropped=" + std::to_string(packets_dropped_.load()));
+    }
 }
 
 bool RtspReceiver::try_pop(EncodedVideoPacket& packet)
@@ -237,6 +279,7 @@ int RtspReceiver::interrupt_callback(void* opaque)
 
 bool RtspReceiver::open_stream(OpenedStream& stream, std::string& error)
 {
+    detail::log_info("Opening RTSP input url=" + safe_url(options_.url));
     AVFormatContext* context = avformat_alloc_context();
     if (context == nullptr) {
         error = "Could not allocate FFmpeg format context.";
@@ -266,6 +309,7 @@ bool RtspReceiver::open_stream(OpenedStream& stream, std::string& error)
         return false;
     }
     stream.context.reset(context);
+    detail::log_info("RTSP input opened; reading stream metadata");
 
     const int info_result = avformat_find_stream_info(context, nullptr);
     if (info_result < 0) {
@@ -306,11 +350,17 @@ bool RtspReceiver::open_stream(OpenedStream& stream, std::string& error)
         video_index,
         std::move(codec_extradata)
     };
+    detail::log_info("Video stream selected codec=" + stream.info.codec_name +
+        " resolution=" + std::to_string(stream.info.width) + "x" +
+        std::to_string(stream.info.height) +
+        " stream_index=" + std::to_string(stream.info.stream_index) +
+        " codec_extradata_bytes=" + std::to_string(stream.info.codec_extradata.size()));
     return true;
 }
 
 void RtspReceiver::receive_loop(OpenedStream stream)
 {
+    detail::log_info("Receive worker started");
     AVPacket* packet = av_packet_alloc();
     if (packet == nullptr) {
         set_error("Could not allocate FFmpeg packet.");
@@ -339,6 +389,16 @@ void RtspReceiver::receive_loop(OpenedStream stream)
 
                     packets_received_++;
                     bytes_received_ += static_cast<std::uint64_t>(packet->size);
+                    const auto received = packets_received_.load();
+                    if (received == 1 || received % 300 == 0) {
+                        detail::log_info("Video packet received count=" +
+                            std::to_string(received) +
+                            " bytes=" + std::to_string(packet->size) +
+                            " total_bytes=" + std::to_string(bytes_received_.load()) +
+                            " pts=" + std::to_string(packet->pts) +
+                            " key_frame=" +
+                            ((packet->flags & AV_PKT_FLAG_KEY) != 0 ? "true" : "false"));
+                    }
                     enqueue(std::move(frame));
                 }
                 av_packet_unref(packet);
@@ -354,15 +414,20 @@ void RtspReceiver::receive_loop(OpenedStream stream)
             set_error("RTSP packet read failed: " + ffmpeg_error(read_result));
             stream.context.reset();
             if (!options_.reconnect) {
+                detail::log_warning("Reconnection disabled; receive worker will stop");
                 break;
             }
 
             bool reconnected = false;
+            std::uint64_t reconnect_attempt = 0;
             while (!stop_requested_) {
                 if (!wait_for_reconnect_delay() || stop_requested_) {
                     break;
                 }
 
+                ++reconnect_attempt;
+                detail::log_info("Reconnect attempt=" + std::to_string(reconnect_attempt) +
+                    " delay_ms=" + std::to_string(options_.reconnect_delay.count()));
                 OpenedStream replacement;
                 std::string error;
                 if (!open_stream(replacement, error)) {
@@ -381,6 +446,8 @@ void RtspReceiver::receive_loop(OpenedStream stream)
                 }
                 connected_ = true;
                 reconnected = true;
+                detail::log_info("RTSP reconnection succeeded attempt=" +
+                    std::to_string(reconnect_attempt));
                 break;
             }
             if (!reconnected) {
@@ -397,25 +464,48 @@ void RtspReceiver::receive_loop(OpenedStream stream)
     connected_ = false;
     running_ = false;
     queue_changed_.notify_all();
+    detail::log_info("Receive worker exited packets_received=" +
+        std::to_string(packets_received_.load()) +
+        " bytes_received=" + std::to_string(bytes_received_.load()) +
+        " packets_dropped=" + std::to_string(packets_dropped_.load()));
 }
 
 void RtspReceiver::enqueue(EncodedVideoPacket packet)
 {
+    bool dropped = false;
+    std::uint64_t dropped_count = 0;
     {
         std::lock_guard<std::mutex> lock(queue_mutex_);
         if (queue_.size() >= options_.queue_capacity) {
             queue_.pop_front();
-            packets_dropped_++;
+            dropped_count = ++packets_dropped_;
+            dropped = true;
         }
         queue_.push_back(std::move(packet));
+    }
+    if (dropped && (dropped_count == 1 || dropped_count % 100 == 0)) {
+        detail::log_warning("Packet queue full; oldest packet dropped count=" +
+            std::to_string(dropped_count) +
+            " queue_capacity=" + std::to_string(options_.queue_capacity));
     }
     queue_changed_.notify_one();
 }
 
 void RtspReceiver::set_error(std::string error)
 {
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    last_error_ = std::move(error);
+    bool changed = false;
+    std::string logged_error;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        changed = !error.empty() && last_error_ != error;
+        if (changed) {
+            logged_error = error;
+        }
+        last_error_ = std::move(error);
+    }
+    if (changed) {
+        detail::log_error(logged_error);
+    }
 }
 
 bool RtspReceiver::wait_for_reconnect_delay()

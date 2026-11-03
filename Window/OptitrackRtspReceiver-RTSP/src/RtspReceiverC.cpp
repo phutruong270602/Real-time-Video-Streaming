@@ -32,6 +32,10 @@ extern "C" {
 #define OPTITRACK_RTSP_LOG_FILE "log/rtsp_receiver.log"
 #endif
 
+#ifndef OPTITRACK_RTSP_DECODED_FRAME_LOG_FILE
+#define OPTITRACK_RTSP_DECODED_FRAME_LOG_FILE "log/decoded_frames.log"
+#endif
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -92,6 +96,65 @@ void log_event(const std::string& event) noexcept
             OutputDebugStringA("Optitrack RTSP log error: unknown failure.\n");
 #else
             std::fprintf(stderr, "Optitrack RTSP log error: unknown failure.\n");
+#endif
+        }
+    }
+}
+
+void log_decoded_frame(const std::string& event) noexcept
+{
+    static std::mutex log_mutex;
+    static bool failure_reported = false;
+    std::lock_guard<std::mutex> lock(log_mutex);
+
+    try {
+        static std::ofstream output = [] {
+            const std::filesystem::path path(OPTITRACK_RTSP_DECODED_FRAME_LOG_FILE);
+            if (!path.parent_path().empty()) {
+                std::filesystem::create_directories(path.parent_path());
+            }
+            return std::ofstream(path, std::ios::out | std::ios::app);
+        }();
+        if (!output) {
+            throw std::runtime_error("Could not open decoded frame log file.");
+        }
+
+        const auto now = std::chrono::system_clock::now();
+        const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()) % 1000;
+        const auto time = std::chrono::system_clock::to_time_t(now);
+        std::tm local_time{};
+#ifdef _WIN32
+        localtime_s(&local_time, &time);
+#else
+        localtime_r(&time, &local_time);
+#endif
+        output << std::put_time(&local_time, "%Y-%m-%d %H:%M:%S")
+               << '.' << std::setfill('0') << std::setw(3) << milliseconds.count()
+               << " [thread " << std::this_thread::get_id() << "] "
+               << event << '\n';
+        output.flush();
+        if (!output) {
+            throw std::runtime_error("Could not write decoded frame log file.");
+        }
+    } catch (const std::exception& exception) {
+        if (!failure_reported) {
+            failure_reported = true;
+#ifdef _WIN32
+            const auto message = std::string("Optitrack decoded frame log error: ") +
+                exception.what() + "\n";
+            OutputDebugStringA(message.c_str());
+#else
+            std::fprintf(stderr, "Optitrack decoded frame log error: %s\n", exception.what());
+#endif
+        }
+    } catch (...) {
+        if (!failure_reported) {
+            failure_reported = true;
+#ifdef _WIN32
+            OutputDebugStringA("Optitrack decoded frame log error: unknown failure.\n");
+#else
+            std::fprintf(stderr, "Optitrack decoded frame log error: unknown failure.\n");
 #endif
         }
     }
@@ -387,6 +450,33 @@ struct NativeReceiver {
                     if (rows == frame_height) {
                         std::uint64_t decoded_count = 0;
                         std::uint64_t sequence = 0;
+                        const auto sample_byte_count = std::min<std::size_t>(16, bgra.size());
+                        std::string pixel_sample = "pixel_bytes_first_16=[";
+                        for (std::size_t i = 0; i < sample_byte_count; ++i) {
+                            if (i != 0) {
+                                pixel_sample += ',';
+                            }
+                            pixel_sample += std::to_string(
+                                static_cast<unsigned int>(bgra[i]));
+                        }
+                        pixel_sample += "] pixels_first_4_bgra=[";
+                        const auto sample_pixel_count = sample_byte_count / 4;
+                        for (std::size_t i = 0; i < sample_pixel_count; ++i) {
+                            if (i != 0) {
+                                pixel_sample += ',';
+                            }
+                            const auto offset = i * 4;
+                            pixel_sample += "(B=" +
+                                std::to_string(static_cast<unsigned int>(bgra[offset])) +
+                                ",G=" +
+                                std::to_string(static_cast<unsigned int>(bgra[offset + 1])) +
+                                ",R=" +
+                                std::to_string(static_cast<unsigned int>(bgra[offset + 2])) +
+                                ",A=" +
+                                std::to_string(static_cast<unsigned int>(bgra[offset + 3])) +
+                                ')';
+                        }
+                        pixel_sample += ']';
                         {
                             std::lock_guard<std::mutex> lock(frame_mutex);
                             latest_frame = std::move(bgra);
@@ -399,6 +489,20 @@ struct NativeReceiver {
                             decoded_count = frames_decoded;
                             sequence = frame_sequence;
                         }
+                        log_decoded_frame("FRAME decoded_count=" +
+                            std::to_string(decoded_count) +
+                            " sequence=" + std::to_string(sequence) +
+                            " resolution=" + std::to_string(frame_width) + "x" +
+                            std::to_string(frame_height) +
+                            " conversion=decoded_frame_to_BGRA pixel_format=BGRA" +
+                            " stride=" + std::to_string(frame_stride) +
+                            " frame_bytes=" +
+                            std::to_string(static_cast<std::size_t>(frame_stride) *
+                                static_cast<std::size_t>(frame_height)) +
+                            " timestamp_ms=" + std::to_string(encoded.timestamp_ms) +
+                            " pts=" + std::to_string(decoded_frame->pts) +
+                            " input_packet_bytes=" + std::to_string(encoded.data.size()) +
+                            " " + pixel_sample);
                         if (decoded_count == 1 || decoded_count % 30 == 0) {
                             log_event("DECODE frame_count=" + std::to_string(decoded_count) +
                                 " sequence=" + std::to_string(sequence) +
