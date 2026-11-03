@@ -9,15 +9,16 @@ This Xcode project publishes the iPhone camera as an H.264 RTSP stream for
 2. Allow camera and local-network access. Keep the app open and both devices on
    the same LAN.
 3. The app starts the RTSP server and shows its URL, normally
-   `rtsp://<iPhone-LAN-IP>:8554/`. It advertises `_rtsp._tcp` with Bonjour.
+   `rtsp://<iPhone-LAN-IP>:8554/`. It announces server availability using UDP
+   broadcast on port `8555`.
 4. In `OptitrackRtspReceiver`, discover and select the iPhone RTSP server, or
    enter the displayed URL manually. The receiver supports RTSP over UDP and
    interleaved TCP.
 
-RTSP control and stream setup use TCP port `8554`; the iPhone advertises this
-same port in its Bonjour `_rtsp._tcp` SRV record, and the Windows receiver uses
-the advertised port when it builds the URL. Bonjour itself uses the standard
-multicast UDP port `5353` for discovery; this is separate from the RTSP port.
+RTSP control and stream setup use TCP port `8554`. Discovery broadcasts the
+fixed announcement `IPHONE_RTSP|1|8554` to `255.255.255.255:8555`; Windows uses
+the packet's source IP to build the RTSP URL. Both devices must be on the same
+LAN, and Windows must allow inbound UDP `8555` on its Private/Domain profile.
 UDP RTP uses server port `5004` (with adjacent RTCP port `5005` advertised);
 the sender does not consume RTCP reports. If UDP setup fails because port
 `5004` is unavailable, select TCP in the Windows receiver.

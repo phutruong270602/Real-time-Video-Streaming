@@ -88,7 +88,7 @@ public partial class MainWindow : Window
         _viewModel.ControlStatus = "Searching for iPhone RTSP servers on the local network...";
         ReceiverLog.Write(
             "RTSP_DISCOVERY",
-            "scan_started service_type=_rtsp._tcp.local protocol=mDNS multicast_udp_port=5353 rtsp_transport=TCP expected_rtsp_port=8554 duration_seconds=7");
+            "scan_started protocol=UDP_broadcast broadcast_address=255.255.255.255 discovery_udp_port=8555 rtsp_transport=TCP expected_rtsp_port=8554 duration_seconds=7");
 
         try
         {
@@ -102,10 +102,10 @@ public partial class MainWindow : Window
 
             if (servers.Count == 0)
             {
-                _viewModel.ControlStatus = "No Bonjour response received. Confirm the iPhone is streaming and both devices share the same LAN; then allow UDP 5353 in Windows Firewall.";
+                _viewModel.ControlStatus = "No iPhone broadcast received. Confirm the sender is running, both devices share the same LAN, and UDP 8555 is allowed in Windows Firewall.";
                 ReceiverLog.Write(
                     "RTSP_DISCOVERY",
-                    "scan_completed servers_found=0 mdns_messages_received=0 next_check=allow_inbound_udp_5353_on_private_domain_profile_or_check_wifi_multicast_isolation");
+                    "scan_completed servers_found=0 udp_messages_received=0 next_check=allow_inbound_udp_8555_or_check_wifi_broadcast_isolation");
             }
             else
             {
@@ -127,7 +127,7 @@ public partial class MainWindow : Window
             _viewModel.LastError = $"Could not search for RTSP servers: {exception.Message}";
             ReceiverLog.Write(
                 "ERROR",
-                $"RTSP discovery failed: error=\"{exception}\" mDNS_port=UDP/5353 rtsp_port=TCP/8554");
+                $"RTSP discovery failed: error=\"{exception}\" discovery_port=UDP/8555 rtsp_port=TCP/8554");
         }
         finally
         {
@@ -1242,7 +1242,7 @@ public partial class MainWindow : Window
             startInfo.ArgumentList.Add("-RtspOnly");
             Process.Start(startInfo);
             _viewModel.LastError = string.Empty;
-            _viewModel.Diagnostic = "RTSP Bonjour firewall setup requested. It allows LAN-only inbound UDP 5353 on Private/Domain networks; set the Wi-Fi network profile to Private if needed.";
+            _viewModel.Diagnostic = "RTSP discovery firewall setup requested. It allows inbound UDP 8555 only from the local subnet.";
         }
         catch (System.ComponentModel.Win32Exception exception) when (exception.NativeErrorCode == 1223)
         {

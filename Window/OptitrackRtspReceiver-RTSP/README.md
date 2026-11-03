@@ -49,19 +49,16 @@ reports the most recent open/read failure and clears after a successful reconnec
 The WPF application is locked to **RTSP URL** mode and no longer starts the
 iPhone WebSocket signaling server or WebRTC receiver. It contains the URL and
 UDP/TCP controls, connection timeout, automatic reconnect and delay, and
-encoded packet queue capacity. **Find RTSP servers (Bonjour)** searches the
-local network for `_rtsp._tcp.local` DNS-SD advertisements and resolves the
-service and its IP address through mDNS, then fills in the discovered RTSP URL.
-The iPhone sender must be running on the same Wi-Fi. Guest-network isolation or
-a firewall blocking multicast UDP port `5353` can prevent discovery. Discovery
-uses mDNS over multicast UDP `5353`; the advertised RTSP service uses TCP
-`8554`. The iPhone advertises its RTSP listener port in DNS-SD, and the receiver
-uses the advertised port in the URL. Detailed scan and DNS record diagnostics
-are written to `log/receiver_ui.log`. The monitor shows
-an **Allow Bonjour through Windows Firewall** button that requests administrator
-approval to add an inbound UDP `5353` rule limited to the local subnet and
-Private/Domain network profiles. Set the Wi-Fi network profile to Private if
-the rule does not apply; the RTSP-only setup does not open TCP `8080`.
+encoded packet queue capacity. **Find iPhone RTSP server** listens for a small
+UDP broadcast announcement on port `8555`, learns the sender IP from the
+datagram, and fills in the RTSP URL. The iPhone sender must be running on the
+same Wi-Fi. Guest-network isolation or a firewall blocking UDP broadcast can
+prevent discovery. Discovery uses UDP port `8555`; the RTSP service itself uses
+TCP port `8554`. Detailed discovery diagnostics are written to
+`log/receiver_ui.log`. The monitor shows an **Allow discovery through Windows
+Firewall** button that requests administrator approval to add an inbound UDP
+`8555` rule limited to the local subnet on any network profile; this RTSP-only
+setup does not open TCP `8080`.
 connection/codec/resolution, receive/decode/render FPS, bitrate, packet/byte
 counts, queue drops and drop rate, session duration, and diagnostics. WebRTC
 and iPhone source controls are not available in this RTSP-only client. Its build

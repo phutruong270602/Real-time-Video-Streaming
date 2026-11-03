@@ -12,8 +12,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     @Published private(set) var isRunning = false
 
     let port = StreamingConfiguration.rtspPort
-    private let bonjourServiceType = "_rtsp._tcp"
-    private let bonjourMulticastPort: UInt16 = 5353
+    private let discoveryPort: UInt16 = 8555
 
     private let networkQueue = DispatchQueue(label: "iphone.rtsp.server.network")
     private let encoderQueue = DispatchQueue(label: "iphone.rtsp.server.encoder")
@@ -21,6 +20,9 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private let imageContext = CIContext(options: [.useSoftwareRenderer: false])
     private let udpRTPPort: UInt16 = 5004
     private var listener: NWListener?
+    private var discoverySocket: Int32 = -1
+    private var discoveryTimer: DispatchSourceTimer?
+    private var discoverySendFailed = false
     private var client: NWConnection?
     private var clientBuffer = Data()
     private var udpSender: NWConnection?
@@ -74,19 +76,15 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                 let port = NWEndpoint.Port(rawValue: self.port)!
                 let listener = try NWListener(using: .tcp, on: port)
                 let serviceName = "\(ProcessInfo.processInfo.hostName) RTSP"
-                listener.service = NWListener.Service(
-                    name: serviceName,
-                    type: self.bonjourServiceType,
-                    domain: "local."
-                )
                 listener.stateUpdateHandler = { [weak self] state in
                     switch state {
                     case .ready:
                         self?.networkQueue.async {
                             self?.updateStatus("RTSP ready at \(self?.streamURL ?? "unknown URL")")
                             guard let self else { return }
+                            self.startDiscoveryBroadcast()
                             AppLogger.info(
-                                "RTSP listener ready: url=\(self.streamURL) transport=TCP port=\(self.port); Bonjour service=\(serviceName)._rtsp._tcp.local advertises SRV port=\(self.port); mDNS discovery uses UDP \(self.bonjourMulticastPort)",
+                                "RTSP listener ready: url=\(self.streamURL) transport=TCP port=\(self.port); UDP broadcast discovery active on port \(self.discoveryPort)",
                                 category: "RTSP"
                             )
                         }
@@ -99,7 +97,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                         self?.networkQueue.async {
                             self?.updateStatus("RTSP server failed: \(error.localizedDescription)")
                             AppLogger.error(
-                                "RTSP listener failed: tcp_port=\(self?.port ?? 0) bonjour_service=\(serviceName)._rtsp._tcp.local error=\(error.localizedDescription)",
+                                "RTSP listener failed: tcp_port=\(self?.port ?? 0) error=\(error.localizedDescription)",
                                 category: "RTSP"
                             )
                             self?.stopOnNetworkQueue(camera: camera)
@@ -108,7 +106,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                         self?.networkQueue.async {
                             self?.setRunning(false, status: "RTSP server stopped")
                             AppLogger.info(
-                                "RTSP listener stopped: tcp_port=\(self?.port ?? 0), Bonjour service withdrawn",
+                                "RTSP listener stopped: tcp_port=\(self?.port ?? 0), UDP broadcast discovery stopped",
                                 category: "RTSP"
                             )
                         }
@@ -123,7 +121,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                 listener.start(queue: self.networkQueue)
                 self.setRunning(true, status: "Starting RTSP server...")
                 AppLogger.info(
-                    "RTSP server starting: url=\(self.streamURL) transport=TCP rtsp_port=\(self.port) bonjour_service=\(serviceName)._rtsp._tcp.local bonjour_protocol=mDNS multicast_udp_port=\(self.bonjourMulticastPort)",
+                    "RTSP server starting: url=\(self.streamURL) transport=TCP rtsp_port=\(self.port) discovery=UDP_broadcast broadcast_address=255.255.255.255 discovery_udp_port=\(self.discoveryPort) service_name=\"\(serviceName)\"",
                     category: "RTSP"
                 )
             } catch {
@@ -193,6 +191,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
 
     private func stopOnNetworkQueue(camera: CameraManager?) {
         camera?.onFrame = nil
+        stopDiscoveryBroadcast()
         listener?.newConnectionHandler = nil
         listener?.cancel()
         listener = nil
@@ -219,6 +218,82 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             }
         }
         setRunning(false, status: "RTSP server stopped")
+    }
+
+    private func startDiscoveryBroadcast() {
+        guard discoverySocket < 0 else { return }
+
+        let socketDescriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard socketDescriptor >= 0 else {
+            AppLogger.error("Could not create UDP discovery socket: errno=\(errno)", category: "RTSP")
+            return
+        }
+
+        var allowBroadcast: Int32 = 1
+        guard setsockopt(
+            socketDescriptor,
+            SOL_SOCKET,
+            SO_BROADCAST,
+            &allowBroadcast,
+            socklen_t(MemoryLayout<Int32>.size)
+        ) == 0 else {
+            let socketError = errno
+            close(socketDescriptor)
+            AppLogger.error("Could not enable UDP broadcast: errno=\(socketError)", category: "RTSP")
+            return
+        }
+
+        discoverySocket = socketDescriptor
+        let timer = DispatchSource.makeTimerSource(queue: networkQueue)
+        timer.schedule(deadline: .now(), repeating: .seconds(1))
+        timer.setEventHandler { [weak self] in
+            self?.sendDiscoveryBroadcast()
+        }
+        discoveryTimer = timer
+        timer.resume()
+    }
+
+    private func sendDiscoveryBroadcast() {
+        guard discoverySocket >= 0 else { return }
+        let payload = Data("IPHONE_RTSP|1|\(port)".utf8)
+        var destination = sockaddr_in()
+        destination.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        destination.sin_family = sa_family_t(AF_INET)
+        destination.sin_port = in_port_t(discoveryPort).bigEndian
+        destination.sin_addr = in_addr(s_addr: inet_addr("255.255.255.255"))
+
+        let bytesSent = payload.withUnsafeBytes { payloadBytes in
+            withUnsafePointer(to: &destination) { addressPointer in
+                addressPointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    sendto(
+                        discoverySocket,
+                        payloadBytes.baseAddress,
+                        payloadBytes.count,
+                        0,
+                        $0,
+                        socklen_t(MemoryLayout<sockaddr_in>.size)
+                    )
+                }
+            }
+        }
+
+        if bytesSent < 0 {
+            if !discoverySendFailed {
+                AppLogger.warning("UDP discovery broadcast failed: errno=\(errno)", category: "RTSP")
+                discoverySendFailed = true
+            }
+        } else {
+            discoverySendFailed = false
+        }
+    }
+
+    private func stopDiscoveryBroadcast() {
+        discoveryTimer?.cancel()
+        discoveryTimer = nil
+        if discoverySocket >= 0 {
+            close(discoverySocket)
+            discoverySocket = -1
+        }
     }
 
     private func accept(_ connection: NWConnection) {

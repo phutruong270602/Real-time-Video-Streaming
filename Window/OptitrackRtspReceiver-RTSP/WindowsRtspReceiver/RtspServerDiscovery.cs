@@ -1,5 +1,6 @@
-using Makaretu.Dns;
 using System.Net;
+using System.Net.Sockets;
+using System.Text;
 
 namespace WindowsRtspReceiver;
 
@@ -12,191 +13,70 @@ internal sealed record RtspServer(string Name, IPAddress Address, ushort Port)
 
 internal sealed class RtspServerDiscovery
 {
-    private const ushort RtspPort = 8554;
+    private const ushort DiscoveryPort = 8555;
+    private const string AnnouncementPrefix = "IPHONE_RTSP|1|";
 
     public async Task<IReadOnlyList<RtspServer>> DiscoverAsync(
         TimeSpan scanDuration,
         CancellationToken cancellationToken)
     {
-        using var discovery = new ServiceDiscovery();
-        var multicast = discovery.Mdns;
-        var servers = new Dictionary<string, RtspServer>(StringComparer.OrdinalIgnoreCase);
-        var services = new Dictionary<string, (string Name, string Target, ushort Port)>(
-            StringComparer.OrdinalIgnoreCase);
-        var addresses = new Dictionary<string, HashSet<IPAddress>>(StringComparer.OrdinalIgnoreCase);
-        var loggedRecords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var sync = new object();
-        var messageCount = 0;
-        var recordCount = 0;
-        var serviceInstanceCount = 0;
+        using var udpClient = new UdpClient(AddressFamily.InterNetwork);
+        udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, DiscoveryPort));
 
-        void ProcessAnswer(Message message, IPEndPoint source)
-        {
-            var records = message.Answers.Concat(message.AdditionalRecords).ToArray();
-            var srvRecords = records
-                .OfType<SRVRecord>()
-                .Where(record => record.Port > 0 && IsRtspServiceInstance(record.Name))
-                .ToArray();
-            var addressRecords = records.OfType<AddressRecord>().ToArray();
-            var targetsToResolve = new HashSet<DomainName>();
-            var newRecordDetails = new List<string>();
+        var servers = new Dictionary<IPAddress, RtspServer>();
+        var messagesReceived = 0;
+        using var scanCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        scanCancellation.CancelAfter(scanDuration);
+        var startedAt = DateTime.UtcNow;
 
-            lock (sync)
-            {
-                messageCount++;
-                recordCount += records.Length;
+        ReceiverLog.Write(
+            "RTSP_DISCOVERY",
+            $"scan_started protocol=UDP_broadcast broadcast_address=255.255.255.255 discovery_udp_port={DiscoveryPort} rtsp_transport=TCP expected_rtsp_port=8554 duration_seconds={scanDuration.TotalSeconds:0.##}");
+        ReceiverLog.Write(
+            "RTSP_DISCOVERY",
+            $"listener_started local_endpoint={udpClient.Client.LocalEndPoint}");
 
-                foreach (var address in addressRecords)
-                {
-                    var target = address.Name.ToString().TrimEnd('.');
-                    if (!addresses.TryGetValue(target, out var knownAddresses))
-                    {
-                        knownAddresses = [];
-                        addresses.Add(target, knownAddresses);
-                    }
-
-                    knownAddresses.Add(address.Address);
-                    var detail = $"address name=\"{target}\" ip={address.Address}";
-                    if (loggedRecords.Add(detail))
-                    {
-                        newRecordDetails.Add(detail);
-                    }
-                }
-
-                foreach (var srv in srvRecords)
-                {
-                    var instance = srv.Name.ToString();
-                    var target = srv.Target.ToString().TrimEnd('.');
-                    var name = srv.Name.Labels.FirstOrDefault()
-                        ?? srv.Name.ToString().TrimEnd('.');
-                    services[instance] = (name, target, srv.Port);
-                    var detail = $"srv instance=\"{instance}\" target=\"{target}\" tcp_port={srv.Port} expected_tcp_port={RtspPort} port_matches_expected={srv.Port == RtspPort}";
-                    if (loggedRecords.Add(detail))
-                    {
-                        newRecordDetails.Add(detail);
-                    }
-
-                    if (!addresses.TryGetValue(target, out var knownAddresses) ||
-                        knownAddresses.Count == 0)
-                    {
-                        targetsToResolve.Add(srv.Target);
-                    }
-                }
-
-                foreach (var service in services.Values)
-                {
-                    if (!addresses.TryGetValue(service.Target, out var knownAddresses))
-                    {
-                        continue;
-                    }
-
-                    foreach (var address in knownAddresses)
-                    {
-                        var server = new RtspServer(service.Name, address, service.Port);
-                        servers[$"{address}:{service.Port}"] = server;
-                    }
-                }
-            }
-
-            if (records.Length > 0)
-            {
-                ReceiverLog.Write(
-                    "RTSP_DISCOVERY",
-                    $"mdns_answer_received source={source} answer_records={message.Answers.Count} additional_records={message.AdditionalRecords.Count}");
-            }
-
-            foreach (var detail in newRecordDetails)
-            {
-                ReceiverLog.Write("RTSP_DISCOVERY", $"mdns_record {detail}");
-            }
-
-            foreach (var target in targetsToResolve)
-            {
-                ReceiverLog.Write(
-                    "RTSP_DISCOVERY",
-                    $"resolve_host_query target=\"{target}\" types=A,AAAA protocol=mDNS udp_port=5353");
-                multicast.SendQuery(target, type: DnsType.A);
-                multicast.SendQuery(target, type: DnsType.AAAA);
-            }
-        }
-
-        void OnServiceInstanceDiscovered(object? sender, ServiceInstanceDiscoveryEventArgs args)
-        {
-            lock (sync)
-            {
-                serviceInstanceCount++;
-            }
-
-            ReceiverLog.Write(
-                "RTSP_DISCOVERY",
-                $"service_instance_found name=\"{args.ServiceInstanceName}\" source={args.RemoteEndPoint}");
-            ProcessAnswer(args.Message, args.RemoteEndPoint);
-            ReceiverLog.Write(
-                "RTSP_DISCOVERY",
-                $"resolve_srv_query name=\"{args.ServiceInstanceName}\" protocol=mDNS udp_port=5353");
-            multicast.SendQuery(args.ServiceInstanceName, type: DnsType.SRV);
-        }
-
-        EventHandler<MessageEventArgs> onAnswerReceived =
-            (_, args) => ProcessAnswer(args.Message, args.RemoteEndPoint);
-        EventHandler<ServiceInstanceDiscoveryEventArgs> onServiceInstanceDiscovered =
-            OnServiceInstanceDiscovered;
-
-        multicast.AnswerReceived += onAnswerReceived;
-        discovery.ServiceInstanceDiscovered += onServiceInstanceDiscovered;
-        var queryCount = 0;
         try
         {
-            var startedAt = DateTime.UtcNow;
-            ReceiverLog.Write(
-                "RTSP_DISCOVERY",
-                $"scan_configuration service_type=_rtsp._tcp.local ptr_query_name=_rtsp._tcp.local protocol=mDNS multicast_udp_port=5353 rtsp_transport=TCP expected_rtsp_port={RtspPort} duration_seconds={scanDuration.TotalSeconds:0.##}");
-            do
+            while (DateTime.UtcNow - startedAt < scanDuration)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                queryCount++;
-                if (queryCount == 1)
+                var received = await udpClient.ReceiveAsync(scanCancellation.Token).ConfigureAwait(false);
+                messagesReceived++;
+                var message = Encoding.UTF8.GetString(received.Buffer);
+                if (!TryParseAnnouncement(message, out var port))
                 {
                     ReceiverLog.Write(
                         "RTSP_DISCOVERY",
-                        "query_sent name=_rtsp._tcp.local type=PTR transport=mDNS multicast_udp_port=5353");
+                        $"announcement_ignored source={received.RemoteEndPoint} payload_length={received.Buffer.Length}");
+                    continue;
                 }
 
-                discovery.QueryServiceInstances(new DomainName("_rtsp._tcp"));
-
-                var remaining = scanDuration - (DateTime.UtcNow - startedAt);
-                if (remaining <= TimeSpan.Zero)
-                {
-                    break;
-                }
-
-                await Task.Delay(
-                    remaining < TimeSpan.FromSeconds(1) ? remaining : TimeSpan.FromSeconds(1),
-                    cancellationToken).ConfigureAwait(false);
+                servers[received.RemoteEndPoint.Address] =
+                    new RtspServer("iPhone RTSP", received.RemoteEndPoint.Address, port);
+                ReceiverLog.Write(
+                    "RTSP_DISCOVERY",
+                    $"announcement_received source={received.RemoteEndPoint} rtsp_port={port}");
             }
-            while (DateTime.UtcNow - startedAt < scanDuration);
         }
-        finally
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            multicast.AnswerReceived -= onAnswerReceived;
-            discovery.ServiceInstanceDiscovered -= onServiceInstanceDiscovered;
         }
 
-        lock (sync)
-        {
-            var results = servers.Values
-                .OrderBy(server => server.Name, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(server => server.Address.ToString(), StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            ReceiverLog.Write(
-                "RTSP_DISCOVERY",
-                $"scan_summary queries_sent={queryCount} mdns_messages_received={messageCount} dns_records_received={recordCount} service_instances={serviceInstanceCount} unique_records_logged={loggedRecords.Count} servers_found={results.Length}");
-            return results;
-        }
+        var results = servers.Values
+            .OrderBy(server => server.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(server => server.Address.ToString(), StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        ReceiverLog.Write(
+            "RTSP_DISCOVERY",
+            $"scan_summary udp_messages_received={messagesReceived} servers_found={results.Length}");
+        return results;
     }
 
-    private static bool IsRtspServiceInstance(DomainName name) =>
-        name.ToString().TrimEnd('.').EndsWith(
-            "._rtsp._tcp.local",
-            StringComparison.OrdinalIgnoreCase);
+    private static bool TryParseAnnouncement(string message, out ushort port)
+    {
+        port = 0;
+        return message.StartsWith(AnnouncementPrefix, StringComparison.Ordinal) &&
+            ushort.TryParse(message.AsSpan(AnnouncementPrefix.Length), out port) &&
+            port > 0;
+    }
 }

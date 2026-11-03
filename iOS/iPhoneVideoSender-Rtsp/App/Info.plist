@@ -7,11 +7,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is needed to stream video from this iPhone.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Local network access is needed to publish an RTSP video stream for the Windows receiver.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_rtsp._tcp</string>
-	</array>
+	<string>Local network access is needed to publish an RTSP video stream and announce it to the Windows receiver.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

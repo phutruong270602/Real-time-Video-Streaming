@@ -7,17 +7,26 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $rules = @()
-if (-not $RtspOnly) {
+if ($RtspOnly) {
+    $rules += @{
+        Name = 'Windows RTSP Receiver - UDP Broadcast Discovery 8555'
+        Protocol = 'UDP'
+        Port = 8555
+        Profile = 'Any'
+    }
+} else {
     $rules += @{
         Name = 'Windows Video Receiver - WebSocket TCP 8080'
         Protocol = 'TCP'
         Port = 8080
+        Profile = @('Private', 'Domain')
     }
-}
-$rules += @{
-    Name = 'Windows Video Receiver - Bonjour mDNS UDP 5353'
-    Protocol = 'UDP'
-    Port = 5353
+    $rules += @{
+        Name = 'Windows Video Receiver - Bonjour mDNS UDP 5353'
+        Protocol = 'UDP'
+        Port = 5353
+        Profile = @('Private', 'Domain')
+    }
 }
 
 foreach ($rule in $rules) {
@@ -31,14 +40,18 @@ foreach ($rule in $rules) {
         -Protocol $rule.Protocol `
         -LocalPort $rule.Port `
         -RemoteAddress LocalSubnet `
-        -Profile Private, Domain `
-        -Description 'Windows Video Receiver LAN access only; Public profile is intentionally excluded.' |
+        -Profile $rule.Profile `
+        -Description 'Windows Video Receiver LAN access only.' |
         Out-Null
 }
 
-Write-Host 'Firewall rules created for Private and Domain networks, limited to LocalSubnet.'
 if ($RtspOnly) {
-    Write-Host 'RTSP-only setup opens Bonjour/mDNS UDP 5353; it does not open WebSocket TCP 8080.'
+    Write-Host 'RTSP-only setup opens UDP broadcast discovery port 8555 for the local subnet on all network profiles.'
+} else {
+    Write-Host 'WebRTC setup opens WebSocket TCP 8080 and Bonjour/mDNS UDP 5353.'
 }
-Write-Host 'The active network must be marked Private (or Domain) for these rules to apply.'
+Write-Host 'Firewall rules are limited to LocalSubnet.'
+if (-not $RtspOnly) {
+    Write-Host 'WebRTC rules apply only to Private and Domain network profiles.'
+}
 Read-Host 'Press Enter to close'
