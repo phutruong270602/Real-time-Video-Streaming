@@ -85,8 +85,10 @@ public partial class MainWindow : Window
         DiscoverRtspServersButton.IsEnabled = false;
         _discoveredRtspServers.Clear();
         RtspServersComboBox.SelectedItem = null;
-        _viewModel.ControlStatus = "Searching the local network for iPhone RTSP servers...";
-        ReceiverLog.Write("RTSP_DISCOVERY", "scan_started service=_rtsp._tcp.local duration_seconds=7");
+        _viewModel.ControlStatus = "Searching for iPhone RTSP servers on the local network...";
+        ReceiverLog.Write(
+            "RTSP_DISCOVERY",
+            "scan_started service_type=_rtsp._tcp.local protocol=mDNS multicast_udp_port=5353 rtsp_transport=TCP expected_rtsp_port=8554 duration_seconds=7");
 
         try
         {
@@ -100,13 +102,17 @@ public partial class MainWindow : Window
 
             if (servers.Count == 0)
             {
-                _viewModel.ControlStatus = "No RTSP server found. Check that the iPhone sender is running on the same Wi-Fi and Windows allows multicast UDP 5353 on a Private or Domain network.";
-                ReceiverLog.Write("RTSP_DISCOVERY", "scan_completed servers_found=0");
+                _viewModel.ControlStatus = "No RTSP server found. Check the iPhone sender is running, both devices share the same LAN, and Windows allows Bonjour/mDNS UDP 5353.";
+                ReceiverLog.Write(
+                    "RTSP_DISCOVERY",
+                    "scan_completed servers_found=0 next_check=sender_running_same_lan_multicast_udp_5353_firewall");
             }
             else
             {
-                _viewModel.ControlStatus = $"Found {servers.Count} RTSP server(s). Select the iPhone to fill in its URL.";
-                ReceiverLog.Write("RTSP_DISCOVERY", $"scan_completed servers_found={servers.Count}");
+                _viewModel.ControlStatus = $"Found {servers.Count} RTSP server(s). Select the iPhone to fill in its RTSP URL.";
+                ReceiverLog.Write(
+                    "RTSP_DISCOVERY",
+                    $"scan_completed servers_found={servers.Count} endpoints=\"{string.Join(",", servers.Select(server => $"{server.Address}:{server.Port}"))}\"");
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -119,7 +125,9 @@ public partial class MainWindow : Window
         {
             _viewModel.ControlStatus = "RTSP server search failed.";
             _viewModel.LastError = $"Could not search for RTSP servers: {exception.Message}";
-            ReceiverLog.Write("ERROR", _viewModel.LastError);
+            ReceiverLog.Write(
+                "ERROR",
+                $"RTSP discovery failed: error=\"{exception}\" mDNS_port=UDP/5353 rtsp_port=TCP/8554");
         }
         finally
         {
@@ -142,7 +150,7 @@ public partial class MainWindow : Window
 
         RtspUrlTextBox.Text = server.Url;
         _viewModel.ControlStatus = $"Selected {server.DisplayName}. The RTSP URL has been filled in.";
-        _viewModel.Diagnostic = "The discovered iPhone RTSP URL is ready to connect.";
+        _viewModel.Diagnostic = $"The discovered iPhone RTSP URL is ready to connect on TCP port {server.Port}.";
         ReceiverLog.Write("RTSP_DISCOVERY", $"server_selected name=\"{server.Name}\" address={server.Address} port={server.Port} url=\"{server.Url}\"");
     }
 

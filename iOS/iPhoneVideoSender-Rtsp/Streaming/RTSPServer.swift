@@ -11,7 +11,9 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     @Published private(set) var status = "RTSP server stopped"
     @Published private(set) var isRunning = false
 
-    let port: UInt16 = 8554
+    let port = StreamingConfiguration.rtspPort
+    private let bonjourServiceType = "_rtsp._tcp"
+    private let bonjourMulticastPort: UInt16 = 5353
 
     private let networkQueue = DispatchQueue(label: "iphone.rtsp.server.network")
     private let encoderQueue = DispatchQueue(label: "iphone.rtsp.server.encoder")
@@ -71,9 +73,10 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             do {
                 let port = NWEndpoint.Port(rawValue: self.port)!
                 let listener = try NWListener(using: .tcp, on: port)
+                let serviceName = "\(ProcessInfo.processInfo.hostName) RTSP"
                 listener.service = NWListener.Service(
-                    name: "\(ProcessInfo.processInfo.hostName) RTSP",
-                    type: "_rtsp._tcp",
+                    name: serviceName,
+                    type: self.bonjourServiceType,
                     domain: "local."
                 )
                 listener.stateUpdateHandler = { [weak self] state in
@@ -81,15 +84,33 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                     case .ready:
                         self?.networkQueue.async {
                             self?.updateStatus("RTSP ready at \(self?.streamURL ?? "unknown URL")")
+                            guard let self else { return }
+                            AppLogger.info(
+                                "RTSP listener ready: url=\(self.streamURL) transport=TCP port=\(self.port); Bonjour service=\(serviceName)._rtsp._tcp.local advertises SRV port=\(self.port); mDNS discovery uses UDP \(self.bonjourMulticastPort)",
+                                category: "RTSP"
+                            )
                         }
+                    case .waiting(let error):
+                        AppLogger.warning(
+                            "RTSP listener waiting: \(error.localizedDescription)",
+                            category: "RTSP"
+                        )
                     case .failed(let error):
                         self?.networkQueue.async {
                             self?.updateStatus("RTSP server failed: \(error.localizedDescription)")
+                            AppLogger.error(
+                                "RTSP listener failed: tcp_port=\(self?.port ?? 0) bonjour_service=\(serviceName)._rtsp._tcp.local error=\(error.localizedDescription)",
+                                category: "RTSP"
+                            )
                             self?.stopOnNetworkQueue(camera: camera)
                         }
                     case .cancelled:
                         self?.networkQueue.async {
                             self?.setRunning(false, status: "RTSP server stopped")
+                            AppLogger.info(
+                                "RTSP listener stopped: tcp_port=\(self?.port ?? 0), Bonjour service withdrawn",
+                                category: "RTSP"
+                            )
                         }
                     default:
                         break
@@ -102,7 +123,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                 listener.start(queue: self.networkQueue)
                 self.setRunning(true, status: "Starting RTSP server...")
                 AppLogger.info(
-                    "RTSP server starting at \(self.streamURL), service _rtsp._tcp port \(self.port)",
+                    "RTSP server starting: url=\(self.streamURL) transport=TCP rtsp_port=\(self.port) bonjour_service=\(serviceName)._rtsp._tcp.local bonjour_protocol=mDNS multicast_udp_port=\(self.bonjourMulticastPort)",
                     category: "RTSP"
                 )
             } catch {
@@ -212,6 +233,10 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         clientBuffer.removeAll()
         sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         client = connection
+        AppLogger.info(
+            "RTSP incoming client: endpoint=\(connection.endpoint) server_url=\(streamURL)",
+            category: "RTSP"
+        )
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self, let connection else { return }
             switch state {

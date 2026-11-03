@@ -14,10 +14,13 @@ This Xcode project publishes the iPhone camera as an H.264 RTSP stream for
    enter the displayed URL manually. The receiver supports RTSP over UDP and
    interleaved TCP.
 
-The sender listens on RTSP TCP port `8554`. UDP RTP uses server port `5004`
-(with adjacent RTCP port `5005` advertised); the sender does not consume RTCP
-reports. If UDP setup fails because port `5004` is unavailable, select TCP in
-the Windows receiver.
+RTSP control and stream setup use TCP port `8554`; the iPhone advertises this
+same port in its Bonjour `_rtsp._tcp` SRV record, and the Windows receiver uses
+the advertised port when it builds the URL. Bonjour itself uses the standard
+multicast UDP port `5353` for discovery; this is separate from the RTSP port.
+UDP RTP uses server port `5004` (with adjacent RTCP port `5005` advertised);
+the sender does not consume RTCP reports. If UDP setup fails because port
+`5004` is unavailable, select TCP in the Windows receiver.
 
 The default video output is `960 × 1080`, center-cropped from the camera's
 `1920 × 1080` capture format. Other available resolutions depend on the

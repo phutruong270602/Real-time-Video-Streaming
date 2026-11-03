@@ -53,7 +53,11 @@ encoded packet queue capacity. **Find RTSP servers (Bonjour)** searches the
 local network for `_rtsp._tcp.local` DNS-SD advertisements and resolves the
 service and its IP address through mDNS, then fills in the discovered RTSP URL.
 The iPhone sender must be running on the same Wi-Fi. Guest-network isolation or
-a firewall blocking multicast UDP port 5353 can prevent discovery. The monitor shows
+a firewall blocking multicast UDP port `5353` can prevent discovery. Discovery
+uses mDNS over multicast UDP `5353`; the advertised RTSP service uses TCP
+`8554`. The iPhone advertises its RTSP listener port in DNS-SD, and the receiver
+uses the advertised port in the URL. Detailed scan and DNS record diagnostics
+are written to `log/receiver_ui.log`. The monitor shows
 connection/codec/resolution, receive/decode/render FPS, bitrate, packet/byte
 counts, queue drops and drop rate, session duration, and diagnostics. WebRTC
 and iPhone source controls are not available in this RTSP-only client. Its build

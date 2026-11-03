@@ -1,6 +1,7 @@
 import Foundation
 
 struct StreamingConfiguration {
+    static let rtspPort: UInt16 = 8554
     static let minimumBitrate = 2_000_000
     static let maximumBitrate = 30_000_000
     static let defaultBitrate = 15_000_000
