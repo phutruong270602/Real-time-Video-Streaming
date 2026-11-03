@@ -4,7 +4,7 @@ import UIKit
 struct RTSPSenderView: View {
     @StateObject private var camera = CameraManager()
     @StateObject private var server = RTSPServer()
-    @State private var bitrate = 8_000_000
+    @State private var bitrate = 12_000_000
     @State private var logLines: [String] = []
     @State private var isLogsExpanded = false
     @State private var isStarting = false
@@ -24,6 +24,12 @@ struct RTSPSenderView: View {
                             .font(.subheadline)
                         Label(server.status, systemImage: "dot.radiowaves.left.and.right")
                             .font(.subheadline)
+                        Label(
+                            server.isClientConnected ? "Client: Connected" : "Client: Disconnected",
+                            systemImage: server.isClientConnected ? "checkmark.circle.fill" : "circle"
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(server.isClientConnected ? .green : .secondary)
                         if server.isRunning {
                             Text(server.streamURL)
                                 .font(.system(.footnote, design: .monospaced))

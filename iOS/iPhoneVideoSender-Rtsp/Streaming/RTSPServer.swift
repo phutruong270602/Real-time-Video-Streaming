@@ -10,6 +10,7 @@ import VideoToolbox
 final class RTSPServer: ObservableObject, @unchecked Sendable {
     @Published private(set) var status = "RTSP server stopped"
     @Published private(set) var isRunning = false
+    @Published private(set) var isClientConnected = false
 
     let port = StreamingConfiguration.rtspPort
     private let discoveryPort: UInt16 = 8555
@@ -39,7 +40,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private var videoWidth = 0
     private var videoHeight = 0
     private var configuredFrameRate = 30
-    private var configuredBitrate = 8_000_000
+    private var configuredBitrate = 12_000_000
     private var compressionSession: VTCompressionSession?
     private var compressionSessionRefcon: UnsafeMutableRawPointer?
     private var rtpSequence = UInt16.random(in: .min ... .max)
@@ -223,6 +224,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         client?.stateUpdateHandler = nil
         client?.cancel()
         client = nil
+        updateClientConnection(false)
         udpSender?.cancel()
         udpSender = nil
         udpRtcpConnection?.cancel()
@@ -447,13 +449,14 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                         let response = try JSONEncoder().encode(self.statisticsMessage())
                         connection.send(
                             content: response,
-                            completion: .contentProcessed { sendError in
+                            completion: .contentProcessed { [weak connection] sendError in
                                 if let sendError {
                                     AppLogger.warning(
                                         "RTSP statistics response failed: \(sendError.localizedDescription)",
                                         category: "RTSP"
                                     )
                                 }
+                                connection?.cancel()
                             }
                         )
                     } catch {
@@ -461,7 +464,9 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                             "Could not encode RTSP statistics: \(error.localizedDescription)",
                             category: "RTSP"
                         )
+                        connection.cancel()
                     }
+                    return
                 }
             }
             if isComplete {
@@ -667,6 +672,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     }
 
     private func accept(_ connection: NWConnection) {
+        updateClientConnection(false)
         if let existingClient = client {
             existingClient.stateUpdateHandler = nil
             existingClient.cancel()
@@ -689,6 +695,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             guard let self, let connection else { return }
             switch state {
             case .ready:
+                self.updateClientConnection(true)
                 self.updateStatus("RTSP client connected")
                 self.receive(from: connection)
             case .failed(let error):
@@ -1050,6 +1057,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         client = nil
         connection.stateUpdateHandler = nil
         connection.cancel()
+        updateClientConnection(false)
         clientBuffer.removeAll()
         isPlaying = false
         stopSenderReportTimer()
@@ -1439,6 +1447,12 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private func updateStatus(_ value: String) {
         DispatchQueue.main.async {
             self.status = value
+        }
+    }
+
+    private func updateClientConnection(_ connected: Bool) {
+        DispatchQueue.main.async {
+            self.isClientConnected = connected
         }
     }
 
