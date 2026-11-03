@@ -66,8 +66,9 @@ statistics to `log/receiver_ui.log`. Native RTSP sessions additionally append
 connection, packet, decode, and error events to `log/rtsp_receiver.log`. RTSP
 start parameters include the selected transport, timeouts, reconnect settings,
 and queue capacity; credentials and URL query strings are omitted from logged
-URLs. Packet and decoded-frame details are sampled on the first item and every
-30 items.
+URLs. The native H.264 decoder is initialized with codec configuration data
+(including SPS/PPS) discovered while opening the RTSP stream. Packet and
+decoded-frame details are sampled on the first item and every 30 items.
 
 ```powershell
 dotnet build .\Window\OptitrackRtspReceiver-RTSP\WindowsRtspReceiver\WindowsRtspReceiver.csproj -c Release

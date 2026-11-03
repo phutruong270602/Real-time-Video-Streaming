@@ -9,7 +9,7 @@
     <PlatformTarget>x64</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
     <NativeBuildDirectory>$(MSBuildProjectDirectory)\native-build</NativeBuildDirectory>
-    <FFmpegRoot Condition="'$(FFmpegRoot)' == ''">$(MSBuildProjectDirectory)\..\..\..\IncepIT-TECSWING-Bay-Camera-64bit\OptitrackCameraDLL\packages\ffmpeg</FFmpegRoot>
+    <FFmpegRoot Condition="'$(FFmpegRoot)' == ''">$(MSBuildProjectDirectory)\..\..\..\..\IncepIT-TECSWING-Bay-Camera-64bit\OptitrackCameraDLL\packages\ffmpeg</FFmpegRoot>
   </PropertyGroup>
 
   <ItemGroup>

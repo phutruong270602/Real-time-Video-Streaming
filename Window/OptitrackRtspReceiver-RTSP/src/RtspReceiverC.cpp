@@ -5,6 +5,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/error.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/mem.h>
 #include <libswscale/swscale.h>
 }
 
@@ -213,8 +214,49 @@ struct NativeReceiver {
         AVPacket* packet = av_packet_alloc();
         SwsContext* conversion = nullptr;
 
-        if (codec_context == nullptr || decoded_frame == nullptr || packet == nullptr ||
-            avcodec_open2(codec_context, codec, nullptr) < 0) {
+        if (codec_context == nullptr || decoded_frame == nullptr || packet == nullptr) {
+            set_error("Could not initialize the FFmpeg H.264 decoder.");
+            receiver.stop();
+            av_packet_free(&packet);
+            av_frame_free(&decoded_frame);
+            avcodec_free_context(&codec_context);
+            return;
+        }
+
+        const auto stream_info = receiver.stream_info();
+        codec_context->width = stream_info.width;
+        codec_context->height = stream_info.height;
+        if (!stream_info.codec_extradata.empty()) {
+            const auto padding = static_cast<std::size_t>(AV_INPUT_BUFFER_PADDING_SIZE);
+            if (stream_info.codec_extradata.size() >
+                static_cast<std::size_t>(std::numeric_limits<int>::max()) - padding) {
+                set_error("H.264 stream configuration is too large for the decoder.");
+                receiver.stop();
+                av_packet_free(&packet);
+                av_frame_free(&decoded_frame);
+                avcodec_free_context(&codec_context);
+                return;
+            }
+
+            codec_context->extradata = static_cast<std::uint8_t*>(av_mallocz(
+                stream_info.codec_extradata.size() + padding));
+            if (codec_context->extradata == nullptr) {
+                set_error("Could not allocate H.264 stream configuration for the decoder.");
+                receiver.stop();
+                av_packet_free(&packet);
+                av_frame_free(&decoded_frame);
+                avcodec_free_context(&codec_context);
+                return;
+            }
+            std::memcpy(
+                codec_context->extradata,
+                stream_info.codec_extradata.data(),
+                stream_info.codec_extradata.size());
+            codec_context->extradata_size =
+                static_cast<int>(stream_info.codec_extradata.size());
+        }
+
+        if (avcodec_open2(codec_context, codec, nullptr) < 0) {
             set_error("Could not initialize the FFmpeg H.264 decoder.");
             receiver.stop();
             av_packet_free(&packet);

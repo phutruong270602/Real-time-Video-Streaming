@@ -293,11 +293,18 @@ bool RtspReceiver::open_stream(OpenedStream& stream, std::string& error)
     }
 
     stream.video_stream_index = video_index;
+    std::vector<std::uint8_t> codec_extradata;
+    if (codec_parameters->extradata != nullptr && codec_parameters->extradata_size > 0) {
+        codec_extradata.assign(
+            codec_parameters->extradata,
+            codec_parameters->extradata + codec_parameters->extradata_size);
+    }
     stream.info = {
         avcodec_get_name(codec_parameters->codec_id),
         codec_parameters->width,
         codec_parameters->height,
-        video_index
+        video_index,
+        std::move(codec_extradata)
     };
     return true;
 }

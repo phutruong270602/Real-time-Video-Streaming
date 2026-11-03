@@ -51,6 +51,7 @@ struct StreamInfo {
     int width = 0;
     int height = 0;
     int stream_index = -1;
+    std::vector<std::uint8_t> codec_extradata;
 };
 
 class RtspReceiver final {
