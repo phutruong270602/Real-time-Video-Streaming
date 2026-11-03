@@ -15,10 +15,12 @@ This Xcode project publishes the iPhone camera as an H.264 RTSP stream for
    enter the displayed URL manually. The receiver supports RTSP over UDP and
    interleaved TCP.
 
-RTSP control and stream setup use TCP port `8554`. Discovery broadcasts the
-fixed announcement `IPHONE_RTSP|1|8554` to `255.255.255.255:8555`; Windows uses
-the packet's source IP to build the RTSP URL. Both devices must be on the same
-LAN, and Windows must allow inbound UDP `8555` on its Private/Domain profile.
+RTSP control and stream setup use TCP port `8554`. Discovery sends the fixed
+announcement `IPHONE_RTSP|1|8554` to the Wi-Fi interface's subnet broadcast
+address on UDP port `8555`; Windows uses the packet's source IP to build the
+RTSP URL. Both devices must be on the same LAN, and Windows must allow inbound
+UDP `8555` on its Private/Domain profile. Guest Wi-Fi, VPN routing, or wireless
+client isolation can still prevent broadcast discovery.
 UDP RTP uses server port `5004` (with adjacent RTCP port `5005` advertised);
 the sender does not consume RTCP reports. If UDP setup fails because port
 `5004` is unavailable, select TCP in the Windows receiver.

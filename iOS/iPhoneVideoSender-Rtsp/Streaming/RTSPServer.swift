@@ -82,9 +82,9 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                         self?.networkQueue.async {
                             self?.updateStatus("RTSP ready at \(self?.streamURL ?? "unknown URL")")
                             guard let self else { return }
-                            self.startDiscoveryBroadcast()
+                            let discoveryStarted = self.startDiscoveryBroadcast()
                             AppLogger.info(
-                                "RTSP listener ready: url=\(self.streamURL) transport=TCP port=\(self.port); UDP broadcast discovery active on port \(self.discoveryPort)",
+                                "RTSP listener ready: url=\(self.streamURL) transport=TCP port=\(self.port); UDP broadcast discovery \(discoveryStarted ? "active" : "unavailable") on port \(self.discoveryPort)",
                                 category: "RTSP"
                             )
                         }
@@ -121,7 +121,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                 listener.start(queue: self.networkQueue)
                 self.setRunning(true, status: "Starting RTSP server...")
                 AppLogger.info(
-                    "RTSP server starting: url=\(self.streamURL) transport=TCP rtsp_port=\(self.port) discovery=UDP_broadcast broadcast_address=255.255.255.255 discovery_udp_port=\(self.discoveryPort) service_name=\"\(serviceName)\"",
+                    "RTSP server starting: url=\(self.streamURL) transport=TCP rtsp_port=\(self.port) discovery=UDP_subnet_broadcast discovery_udp_port=\(self.discoveryPort) service_name=\"\(serviceName)\"",
                     category: "RTSP"
                 )
             } catch {
@@ -220,13 +220,39 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         setRunning(false, status: "RTSP server stopped")
     }
 
-    private func startDiscoveryBroadcast() {
-        guard discoverySocket < 0 else { return }
+    @discardableResult
+    private func startDiscoveryBroadcast() -> Bool {
+        guard discoverySocket < 0 else { return true }
+
+        guard let broadcastConfiguration = Self.wifiIPv4BroadcastConfiguration() else {
+            AppLogger.error(
+                "Could not start UDP discovery: Wi-Fi interface en0 has no active IPv4 address and netmask",
+                category: "RTSP"
+            )
+            return false
+        }
 
         let socketDescriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard socketDescriptor >= 0 else {
             AppLogger.error("Could not create UDP discovery socket: errno=\(errno)", category: "RTSP")
-            return
+            return false
+        }
+
+        var interfaceIndex = broadcastConfiguration.interfaceIndex
+        guard setsockopt(
+            socketDescriptor,
+            IPPROTO_IP,
+            IP_BOUND_IF,
+            &interfaceIndex,
+            socklen_t(MemoryLayout<Int32>.size)
+        ) == 0 else {
+            let socketError = errno
+            close(socketDescriptor)
+            AppLogger.error(
+                "Could not bind UDP discovery to \(broadcastConfiguration.interfaceName): errno=\(socketError)",
+                category: "RTSP"
+            )
+            return false
         }
 
         var allowBroadcast: Int32 = 1
@@ -240,10 +266,33 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             let socketError = errno
             close(socketDescriptor)
             AppLogger.error("Could not enable UDP broadcast: errno=\(socketError)", category: "RTSP")
-            return
+            return false
+        }
+
+        var localEndpoint = sockaddr_in()
+        localEndpoint.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        localEndpoint.sin_family = sa_family_t(AF_INET)
+        localEndpoint.sin_addr = broadcastConfiguration.localAddress
+        guard withUnsafePointer(to: &localEndpoint, {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(socketDescriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }) == 0 else {
+            let socketError = errno
+            close(socketDescriptor)
+            AppLogger.error(
+                "Could not bind UDP discovery to \(broadcastConfiguration.interfaceName) at \(broadcastConfiguration.localAddressText): errno=\(socketError)",
+                category: "RTSP"
+            )
+            return false
         }
 
         discoverySocket = socketDescriptor
+        discoveryBroadcastAddress = broadcastConfiguration.broadcastAddress
+        AppLogger.info(
+            "UDP discovery configured: interface=\(broadcastConfiguration.interfaceName) local_ip=\(broadcastConfiguration.localAddressText) broadcast_address=\(broadcastConfiguration.broadcastAddressText) udp_port=\(discoveryPort)",
+            category: "RTSP"
+        )
         let timer = DispatchSource.makeTimerSource(queue: networkQueue)
         timer.schedule(deadline: .now(), repeating: .seconds(1))
         timer.setEventHandler { [weak self] in
@@ -251,7 +300,11 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         }
         discoveryTimer = timer
         timer.resume()
+        return true
     }
+
+    private var discoveryBroadcastAddress = in_addr(s_addr: INADDR_BROADCAST)
+    private var discoveryBroadcastSent = false
 
     private func sendDiscoveryBroadcast() {
         guard discoverySocket >= 0 else { return }
@@ -260,7 +313,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         destination.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         destination.sin_family = sa_family_t(AF_INET)
         destination.sin_port = in_port_t(discoveryPort).bigEndian
-        destination.sin_addr = in_addr(s_addr: inet_addr("255.255.255.255"))
+        destination.sin_addr = discoveryBroadcastAddress
 
         let bytesSent = payload.withUnsafeBytes { payloadBytes in
             withUnsafePointer(to: &destination) { addressPointer in
@@ -278,11 +331,25 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         }
 
         if bytesSent < 0 {
+            let socketError = errno
             if !discoverySendFailed {
-                AppLogger.warning("UDP discovery broadcast failed: errno=\(errno)", category: "RTSP")
+                AppLogger.warning(
+                    "UDP discovery broadcast failed: destination=\(Self.ipv4String(discoveryBroadcastAddress) ?? "unknown"):\(discoveryPort) errno=\(socketError)",
+                    category: "RTSP"
+                )
                 discoverySendFailed = true
             }
         } else {
+            if !discoveryBroadcastSent {
+                AppLogger.info(
+                    "UDP discovery broadcast sent: destination=\(Self.ipv4String(discoveryBroadcastAddress) ?? "unknown"):\(discoveryPort) bytes=\(bytesSent)",
+                    category: "RTSP"
+                )
+                discoveryBroadcastSent = true
+            }
+            if discoverySendFailed {
+                AppLogger.info("UDP discovery broadcast send recovered", category: "RTSP")
+            }
             discoverySendFailed = false
         }
     }
@@ -294,6 +361,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             close(discoverySocket)
             discoverySocket = -1
         }
+        discoveryBroadcastSent = false
     }
 
     private func accept(_ connection: NWConnection) {
@@ -1023,13 +1091,16 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     }
 
     private static func localIPv4Address() -> String? {
+        wifiIPv4BroadcastConfiguration()?.localAddressText
+    }
+
+    private static func wifiIPv4BroadcastConfiguration() -> IPv4BroadcastConfiguration? {
         var interfaceList: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&interfaceList) == 0, let firstInterface = interfaceList else {
             return nil
         }
         defer { freeifaddrs(interfaceList) }
 
-        var fallback: String?
         var interface = firstInterface
         while true {
             let item = interface.pointee
@@ -1037,21 +1108,57 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                address.pointee.sa_family == UInt8(AF_INET),
                let name = String(validatingUTF8: item.ifa_name),
                name == "en0",
-               item.ifa_flags & UInt32(IFF_LOOPBACK) == 0 {
-                var ipv4 = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+               item.ifa_flags & UInt32(IFF_UP) != 0,
+               item.ifa_flags & UInt32(IFF_LOOPBACK) == 0,
+               let netmask = item.ifa_netmask,
+               netmask.pointee.sa_family == UInt8(AF_INET) {
+                let localAddress = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
                     $0.pointee.sin_addr
                 }
-                var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                if inet_ntop(AF_INET, &ipv4, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil {
-                    fallback = String(cString: buffer)
-                    break
+                let subnetMask = netmask.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                    $0.pointee.sin_addr
                 }
+                let broadcastAddress = in_addr(
+                    s_addr: (localAddress.s_addr & subnetMask.s_addr) | ~subnetMask.s_addr
+                )
+                let interfaceIndex = if_nametoindex(name)
+                guard interfaceIndex > 0,
+                      let localAddressText = ipv4String(localAddress),
+                      let broadcastAddressText = ipv4String(broadcastAddress) else {
+                    return nil
+                }
+                return IPv4BroadcastConfiguration(
+                    interfaceName: name,
+                    interfaceIndex: Int32(interfaceIndex),
+                    localAddress: localAddress,
+                    broadcastAddress: broadcastAddress,
+                    localAddressText: localAddressText,
+                    broadcastAddressText: broadcastAddressText
+                )
             }
             guard let next = item.ifa_next else { break }
             interface = next
         }
-        return fallback
+        return nil
     }
+
+    private static func ipv4String(_ address: in_addr) -> String? {
+        var address = address
+        var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+        guard inet_ntop(AF_INET, &address, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil else {
+            return nil
+        }
+        return String(cString: buffer)
+    }
+}
+
+private struct IPv4BroadcastConfiguration {
+    let interfaceName: String
+    let interfaceIndex: Int32
+    let localAddress: in_addr
+    let broadcastAddress: in_addr
+    let localAddressText: String
+    let broadcastAddressText: String
 }
 
 private enum RTPTransport {

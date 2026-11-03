@@ -94,11 +94,15 @@
                                 Content="Find iPhone RTSP server"
                                 Margin="0,6,0,6" Padding="8,6"
                                 Click="DiscoverRtspServersButton_Click" />
-                        <ComboBox x:Name="RtspServersComboBox"
-                                  DisplayMemberPath="DisplayName"
-                                  SelectionChanged="RtspServersComboBox_SelectionChanged"
-                                  Margin="0,0,0,12"
-                                  ToolTip="Select a discovered RTSP server to fill its IP address and port." />
+                        <ListBox x:Name="DiscoveredRtspServersListBox"
+                                 DisplayMemberPath="DisplayName"
+                                 SelectionChanged="DiscoveredRtspServersListBox_SelectionChanged"
+                                 Height="72" Margin="0,0,0,12"
+                                 Background="#111827" Foreground="White"
+                                 BorderBrush="#475569"
+                                 ToolTip="Select a discovered iPhone to fill in its RTSP URL." />
+                        <TextBlock Text="{Binding ControlStatus}" Foreground="#CBD5E1"
+                                   TextWrapping="Wrap" Margin="0,0,0,12" />
                         <TextBlock Text="Both devices must be on the same Wi-Fi. Discovery uses UDP broadcast port 8555; guest Wi-Fi or firewall isolation can block it."
                                    Foreground="#FBBF24" TextWrapping="Wrap" Margin="0,0,0,12" />
                         <Button Content="Allow discovery through Windows Firewall"

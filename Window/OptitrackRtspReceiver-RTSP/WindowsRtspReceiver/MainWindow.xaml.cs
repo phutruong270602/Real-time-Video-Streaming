@@ -60,7 +60,7 @@ public partial class MainWindow : Window
         DataContext = _viewModel;
         ReconnectDelayComboBox.IsEnabled = ReconnectCheckBox.IsChecked == true;
         VideoImage.Stretch = Stretch.Uniform;
-        RtspServersComboBox.ItemsSource = _discoveredRtspServers;
+        DiscoveredRtspServersListBox.ItemsSource = _discoveredRtspServers;
         ApplyReceiverMode();
         _viewModel.ControlStatus = "RTSP-only mode. Enter a URL from an RTSP server.";
 
@@ -84,17 +84,15 @@ public partial class MainWindow : Window
         _discoveryCancellation = cancellation;
         DiscoverRtspServersButton.IsEnabled = false;
         _discoveredRtspServers.Clear();
-        RtspServersComboBox.SelectedItem = null;
+        DiscoveredRtspServersListBox.SelectedItem = null;
         _viewModel.ControlStatus = "Searching for iPhone RTSP servers on the local network...";
-        ReceiverLog.Write(
-            "RTSP_DISCOVERY",
-            "scan_started protocol=UDP_broadcast broadcast_address=255.255.255.255 discovery_udp_port=8555 rtsp_transport=TCP expected_rtsp_port=8554 duration_seconds=7");
 
         try
         {
-            var servers = await _rtspServerDiscovery.DiscoverAsync(
+            var discoveryResult = await _rtspServerDiscovery.DiscoverAsync(
                 TimeSpan.FromSeconds(7),
                 cancellation.Token);
+            var servers = discoveryResult.Servers;
             foreach (var server in servers)
             {
                 _discoveredRtspServers.Add(server);
@@ -102,17 +100,19 @@ public partial class MainWindow : Window
 
             if (servers.Count == 0)
             {
-                _viewModel.ControlStatus = "No iPhone broadcast received. Confirm the sender is running, both devices share the same LAN, and UDP 8555 is allowed in Windows Firewall.";
+                _viewModel.ControlStatus = discoveryResult.MessagesReceived == 0
+                    ? "No iPhone announcement received. Keep the RTSP server running, allow inbound UDP 8555 in Windows Firewall, and check Wi-Fi client isolation."
+                    : $"Received {discoveryResult.MessagesReceived} UDP message(s), but none contained a valid iPhone RTSP announcement.";
                 ReceiverLog.Write(
                     "RTSP_DISCOVERY",
-                    "scan_completed servers_found=0 udp_messages_received=0 next_check=allow_inbound_udp_8555_or_check_wifi_broadcast_isolation");
+                    $"scan_completed servers_found=0 udp_messages_received={discoveryResult.MessagesReceived} announcements_ignored={discoveryResult.AnnouncementsIgnored} next_check=allow_inbound_udp_8555_or_check_wifi_broadcast_isolation");
             }
             else
             {
                 _viewModel.ControlStatus = $"Found {servers.Count} RTSP server(s). Select the iPhone to fill in its RTSP URL.";
                 ReceiverLog.Write(
                     "RTSP_DISCOVERY",
-                    $"scan_completed servers_found={servers.Count} endpoints=\"{string.Join(",", servers.Select(server => $"{server.Address}:{server.Port}"))}\"");
+                    $"scan_completed servers_found={servers.Count} udp_messages_received={discoveryResult.MessagesReceived} endpoints=\"{string.Join(",", servers.Select(server => $"{server.Address}:{server.Port}"))}\"");
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -139,11 +139,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RtspServersComboBox_SelectionChanged(
+    private void DiscoveredRtspServersListBox_SelectionChanged(
         object sender,
         System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        if (RtspServersComboBox.SelectedItem is not RtspServer server)
+        if (DiscoveredRtspServersListBox.SelectedItem is not RtspServer server)
         {
             return;
         }

@@ -51,11 +51,12 @@ iPhone WebSocket signaling server or WebRTC receiver. It contains the URL and
 UDP/TCP controls, connection timeout, automatic reconnect and delay, and
 encoded packet queue capacity. **Find iPhone RTSP server** listens for a small
 UDP broadcast announcement on port `8555`, learns the sender IP from the
-datagram, and fills in the RTSP URL. The iPhone sender must be running on the
-same Wi-Fi. Guest-network isolation or a firewall blocking UDP broadcast can
-prevent discovery. Discovery uses UDP port `8555`; the RTSP service itself uses
-TCP port `8554`. Detailed discovery diagnostics are written to
-`log/receiver_ui.log`. The monitor shows an **Allow discovery through Windows
+datagram, and displays the discovered IPs in a selectable list below the
+button. Selecting an IP fills in the RTSP URL. The iPhone sender must remain
+running on the same Wi-Fi during discovery. Guest-network isolation or a
+firewall blocking UDP broadcast can prevent discovery. Discovery uses UDP port
+`8555`; the RTSP service itself uses TCP port `8554`. Detailed discovery
+diagnostics are written to `log/receiver_ui.log`. The monitor shows an **Allow discovery through Windows
 Firewall** button that requests administrator approval to add an inbound UDP
 `8555` rule limited to the local subnet on any network profile; this RTSP-only
 setup does not open TCP `8080`.

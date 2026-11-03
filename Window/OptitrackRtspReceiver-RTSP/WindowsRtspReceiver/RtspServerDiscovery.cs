@@ -11,12 +11,17 @@ internal sealed record RtspServer(string Name, IPAddress Address, ushort Port)
     public string Url => new UriBuilder("rtsp", Address.ToString(), Port, "/").Uri.AbsoluteUri;
 }
 
+internal sealed record RtspDiscoveryResult(
+    IReadOnlyList<RtspServer> Servers,
+    int MessagesReceived,
+    int AnnouncementsIgnored);
+
 internal sealed class RtspServerDiscovery
 {
     private const ushort DiscoveryPort = 8555;
     private const string AnnouncementPrefix = "IPHONE_RTSP|1|";
 
-    public async Task<IReadOnlyList<RtspServer>> DiscoverAsync(
+    public async Task<RtspDiscoveryResult> DiscoverAsync(
         TimeSpan scanDuration,
         CancellationToken cancellationToken)
     {
@@ -25,13 +30,14 @@ internal sealed class RtspServerDiscovery
 
         var servers = new Dictionary<IPAddress, RtspServer>();
         var messagesReceived = 0;
+        var announcementsIgnored = 0;
         using var scanCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         scanCancellation.CancelAfter(scanDuration);
         var startedAt = DateTime.UtcNow;
 
         ReceiverLog.Write(
             "RTSP_DISCOVERY",
-            $"scan_started protocol=UDP_broadcast broadcast_address=255.255.255.255 discovery_udp_port={DiscoveryPort} rtsp_transport=TCP expected_rtsp_port=8554 duration_seconds={scanDuration.TotalSeconds:0.##}");
+            $"scan_started protocol=UDP_subnet_broadcast discovery_udp_port={DiscoveryPort} rtsp_transport=TCP expected_rtsp_port=8554 duration_seconds={scanDuration.TotalSeconds:0.##}");
         ReceiverLog.Write(
             "RTSP_DISCOVERY",
             $"listener_started local_endpoint={udpClient.Client.LocalEndPoint}");
@@ -45,6 +51,7 @@ internal sealed class RtspServerDiscovery
                 var message = Encoding.UTF8.GetString(received.Buffer);
                 if (!TryParseAnnouncement(message, out var port))
                 {
+                    announcementsIgnored++;
                     ReceiverLog.Write(
                         "RTSP_DISCOVERY",
                         $"announcement_ignored source={received.RemoteEndPoint} payload_length={received.Buffer.Length}");
@@ -68,8 +75,8 @@ internal sealed class RtspServerDiscovery
             .ToArray();
         ReceiverLog.Write(
             "RTSP_DISCOVERY",
-            $"scan_summary udp_messages_received={messagesReceived} servers_found={results.Length}");
-        return results;
+            $"scan_summary udp_messages_received={messagesReceived} announcements_ignored={announcementsIgnored} servers_found={results.Length}");
+        return new RtspDiscoveryResult(results, messagesReceived, announcementsIgnored);
     }
 
     private static bool TryParseAnnouncement(string message, out ushort port)
