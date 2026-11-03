@@ -52,7 +52,7 @@ encoded packet queue capacity. **Find iPhone RTSP server** listens for a small
 UDP broadcast announcement on port `8555`, learns the sender IP from the
 datagram, and displays the discovered IPs in a selectable list below the
 button. Selecting an IP fills in the RTSP URL. Discovery uses UDP port `8555`;
-the RTSP service itself uses TCP port `8554`. Detailed discovery diagnostics
+the RTSP service itself uses TCP port `554`. Detailed discovery diagnostics
 are written to `log/receiver_ui.log`.
 When connected to the matching iPhone RTSP sender, the monitor polls its
 statistics endpoint on UDP port `8556`. Capture/encode FPS and transmitted
@@ -111,7 +111,7 @@ H.264 packetization and decoder behavior before replacing the old path.
 
 The iPhone sender can also be used directly by the existing `RtspCamera` client:
 both RTSP and the client's HTTP `/ping`, `/camera-toggle`, and `/camera-settings`
-requests use the sender's TCP port `8554`. Use the same
-`rtsp://<iPhone-LAN-IP>:8554/` URL in the DLL and this Windows monitor. The iPhone
+requests use the sender's TCP port `554`. Use the same
+`rtsp://<iPhone-LAN-IP>:554/` URL in the DLL and this Windows monitor. The iPhone
 sender supports frame-rate changes; its speed, ISO, zoom, audio, bandwidth, and
 app-exit controls are not implemented.

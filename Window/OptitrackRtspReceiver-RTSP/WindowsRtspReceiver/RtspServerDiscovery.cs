@@ -37,7 +37,7 @@ internal sealed class RtspServerDiscovery
 
         ReceiverLog.Write(
             "RTSP_DISCOVERY",
-            $"scan_started protocol=UDP_subnet_broadcast discovery_udp_port={DiscoveryPort} rtsp_transport=TCP expected_rtsp_port=8554 duration_seconds={scanDuration.TotalSeconds:0.##}");
+            $"scan_started protocol=UDP_subnet_broadcast discovery_udp_port={DiscoveryPort} rtsp_transport=TCP expected_rtsp_port=554 duration_seconds={scanDuration.TotalSeconds:0.##}");
         ReceiverLog.Write(
             "RTSP_DISCOVERY",
             $"listener_started local_endpoint={udpClient.Client.LocalEndPoint}");

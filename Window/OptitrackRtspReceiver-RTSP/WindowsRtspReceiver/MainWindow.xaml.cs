@@ -145,7 +145,7 @@ public partial class MainWindow : Window
             _viewModel.LastError = $"Could not search for RTSP servers: {exception.Message}";
             ReceiverLog.Write(
                 "ERROR",
-                $"RTSP discovery failed: error=\"{exception}\" discovery_port=UDP/8555 rtsp_port=TCP/8554");
+                $"RTSP discovery failed: error=\"{exception}\" discovery_port=UDP/8555 rtsp_port=TCP/554");
         }
         finally
         {

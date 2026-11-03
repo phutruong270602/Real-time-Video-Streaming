@@ -106,7 +106,7 @@
                         <TextBlock Text="RTSP URL" Foreground="#CBD5E1" />
                         <TextBox x:Name="RtspUrlTextBox" Margin="0,6,0,12"
                                  Padding="8" Text="rtsp://" />
-                        <TextBlock Text="Use the same URL with OptitrackCameraDLL. The iPhone server provides RTSP video and camera-control HTTP endpoints on TCP port 8554."
+                        <TextBlock Text="Use the same URL with OptitrackCameraDLL. The iPhone server provides RTSP video and camera-control HTTP endpoints on TCP port 554."
                                    Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,0,0,12" />
                         <TextBlock Text="Transport" Foreground="#CBD5E1" />
                         <ComboBox x:Name="TransportComboBox" SelectedIndex="0" Margin="0,6,0,16">

@@ -9,14 +9,14 @@ This Xcode project publishes the iPhone camera as an H.264 RTSP stream for
 2. Allow camera and local-network access. Keep the app open and both devices on
    the same LAN.
 3. The app starts the RTSP server and shows its URL, normally
-   `rtsp://<iPhone-LAN-IP>:8554/`. It announces server availability using UDP
+   `rtsp://<iPhone-LAN-IP>:554/`. It announces server availability using UDP
    broadcast on port `8555`.
 4. In `OptitrackRtspReceiver`, discover and select the iPhone RTSP server, or
    enter the displayed URL manually. The receiver supports RTSP over UDP and
    interleaved TCP.
 
-RTSP control and stream setup use TCP port `8554`. Discovery sends the fixed
-announcement `IPHONE_RTSP|1|8554` to the Wi-Fi interface's subnet broadcast
+RTSP control and stream setup use TCP port `554`. Discovery sends the fixed
+announcement `IPHONE_RTSP|1|554` to the Wi-Fi interface's subnet broadcast
 address on UDP port `8555`; Windows uses the packet's source IP to build the
 RTSP URL. Both devices must be on the same LAN, and Windows must allow inbound
 UDP `8555` on its Private/Domain profile. Guest Wi-Fi, VPN routing, or wireless
@@ -26,7 +26,7 @@ The RTSP listener also accepts the HTTP camera-control requests used by
 `OptitrackCameraDLL` on that same TCP port. It implements `/ping`,
 `/camera-toggle`, and `/camera-settings`; supported frame-rate updates are
 applied to the active iPhone camera. Speed, ISO, zoom, audio, bandwidth, and
-app-exit controls are not supported. Use the same `rtsp://<iPhone-LAN-IP>:8554/`
+app-exit controls are not supported. Use the same `rtsp://<iPhone-LAN-IP>:554/`
 URL in `RtspCamera` and the Windows receiver.
 
 The sender provides live capture/encode FPS and transmitted bitrate through a
