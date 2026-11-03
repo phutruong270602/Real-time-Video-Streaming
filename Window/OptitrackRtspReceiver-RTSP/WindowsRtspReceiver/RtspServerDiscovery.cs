@@ -144,10 +144,10 @@ internal sealed class RtspServerDiscovery
 
         multicast.AnswerReceived += onAnswerReceived;
         discovery.ServiceInstanceDiscovered += onServiceInstanceDiscovered;
+        var queryCount = 0;
         try
         {
             var startedAt = DateTime.UtcNow;
-            var queryCount = 0;
             ReceiverLog.Write(
                 "RTSP_DISCOVERY",
                 $"scan_configuration service_type=_rtsp._tcp.local ptr_query_name=_rtsp._tcp.local protocol=mDNS multicast_udp_port=5353 rtsp_transport=TCP expected_rtsp_port={RtspPort} duration_seconds={scanDuration.TotalSeconds:0.##}");

@@ -1,19 +1,24 @@
 #requires -RunAsAdministrator
 
+param(
+    [switch]$RtspOnly
+)
+
 $ErrorActionPreference = 'Stop'
 
-$rules = @(
-    @{
+$rules = @()
+if (-not $RtspOnly) {
+    $rules += @{
         Name = 'Windows Video Receiver - WebSocket TCP 8080'
         Protocol = 'TCP'
         Port = 8080
-    },
-    @{
-        Name = 'Windows Video Receiver - Bonjour mDNS UDP 5353'
-        Protocol = 'UDP'
-        Port = 5353
     }
-)
+}
+$rules += @{
+    Name = 'Windows Video Receiver - Bonjour mDNS UDP 5353'
+    Protocol = 'UDP'
+    Port = 5353
+}
 
 foreach ($rule in $rules) {
     Get-NetFirewallRule -DisplayName $rule.Name -ErrorAction SilentlyContinue |
@@ -32,5 +37,8 @@ foreach ($rule in $rules) {
 }
 
 Write-Host 'Firewall rules created for Private and Domain networks, limited to LocalSubnet.'
+if ($RtspOnly) {
+    Write-Host 'RTSP-only setup opens Bonjour/mDNS UDP 5353; it does not open WebSocket TCP 8080.'
+}
 Write-Host 'The active network must be marked Private (or Domain) for these rules to apply.'
 Read-Host 'Press Enter to close'

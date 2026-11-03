@@ -102,10 +102,10 @@ public partial class MainWindow : Window
 
             if (servers.Count == 0)
             {
-                _viewModel.ControlStatus = "No RTSP server found. Check the iPhone sender is running, both devices share the same LAN, and Windows allows Bonjour/mDNS UDP 5353.";
+                _viewModel.ControlStatus = "No Bonjour response received. Confirm the iPhone is streaming and both devices share the same LAN; then allow UDP 5353 in Windows Firewall.";
                 ReceiverLog.Write(
                     "RTSP_DISCOVERY",
-                    "scan_completed servers_found=0 next_check=sender_running_same_lan_multicast_udp_5353_firewall");
+                    "scan_completed servers_found=0 mdns_messages_received=0 next_check=allow_inbound_udp_5353_on_private_domain_profile_or_check_wifi_multicast_isolation");
             }
             else
             {
@@ -1239,9 +1239,10 @@ public partial class MainWindow : Window
             startInfo.ArgumentList.Add("Bypass");
             startInfo.ArgumentList.Add("-File");
             startInfo.ArgumentList.Add(scriptPath);
+            startInfo.ArgumentList.Add("-RtspOnly");
             Process.Start(startInfo);
             _viewModel.LastError = string.Empty;
-            _viewModel.Diagnostic = "Firewall setup requested. Rules apply only to Private/Domain networks.";
+            _viewModel.Diagnostic = "RTSP Bonjour firewall setup requested. It allows LAN-only inbound UDP 5353 on Private/Domain networks; set the Wi-Fi network profile to Private if needed.";
         }
         catch (System.ComponentModel.Win32Exception exception) when (exception.NativeErrorCode == 1223)
         {

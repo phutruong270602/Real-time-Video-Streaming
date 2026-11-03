@@ -32,12 +32,18 @@ Expand **Application logs** in the sender to see camera, RTSP control, encoder,
 and RTP packet events. The same log is written to the app's Documents directory
 as `iPhoneVideoSender.log`.
 
-To continuously copy the log from an iPhone to a Mac with Xcode, run this from
+To continuously copy app logs from an iPhone to a Mac with Xcode, run this from
 the repository root and replace `iPhone` with the device name or UDID:
 
 ```sh
-bash ./iOS/iPhoneVideoSender-RTSP/capture-app-logs.sh "iPhone"
+bash ./iOS/iPhoneVideoSender-Rtsp/capture-app-logs.sh "iPhone"
 ```
 
-Press Ctrl+C to stop. The captured log is kept separate at
-`iOS/iPhoneVideoSender-RTSP/log/capture-app-logs.log`.
+The script resolves the requested name to a connected iPhone. If that name is
+unavailable and exactly one iPhone is connected, it selects that device and
+records the selection in the log. It appends the same `AppLogger` events shown
+in Xcode's console, plus capture errors and status, to
+`iOS/iPhoneVideoSender-Rtsp/log/capture-app-logs.log`. Keep the sender app open
+while capturing and press Ctrl+C to stop. System-generated AVFoundation/Fig
+messages are not written by the app's `AppLogger`; those remain available in
+Xcode's device console.

@@ -58,6 +58,10 @@ uses mDNS over multicast UDP `5353`; the advertised RTSP service uses TCP
 `8554`. The iPhone advertises its RTSP listener port in DNS-SD, and the receiver
 uses the advertised port in the URL. Detailed scan and DNS record diagnostics
 are written to `log/receiver_ui.log`. The monitor shows
+an **Allow Bonjour through Windows Firewall** button that requests administrator
+approval to add an inbound UDP `5353` rule limited to the local subnet and
+Private/Domain network profiles. Set the Wi-Fi network profile to Private if
+the rule does not apply; the RTSP-only setup does not open TCP `8080`.
 connection/codec/resolution, receive/decode/render FPS, bitrate, packet/byte
 counts, queue drops and drop rate, session duration, and diagnostics. WebRTC
 and iPhone source controls are not available in this RTSP-only client. Its build
