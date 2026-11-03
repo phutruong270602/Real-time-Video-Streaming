@@ -60,9 +60,15 @@ diagnostics are written to `log/receiver_ui.log`. The monitor shows an **Allow d
 Firewall** button that requests administrator approval to add an inbound UDP
 `8555` rule limited to the local subnet on any network profile; this RTSP-only
 setup does not open TCP `8080`.
+When connected to the matching iPhone RTSP sender, the monitor polls its
+statistics endpoint on UDP port `8556`. Capture/encode FPS and transmitted
+bitrate come from the sender; packet loss, jitter and sender RTT come from RTCP
+receiver reports, while receiver RTT is measured by the client. Generic RTSP
+cameras that do not provide this endpoint can still show receiver-side
 connection/codec/resolution, receive/decode/render FPS, bitrate, packet/byte
-counts, queue drops and drop rate, session duration, and diagnostics. WebRTC
-and iPhone source controls are not available in this RTSP-only client. Its build
+counts, queue drops and drop rate, session duration, and diagnostics. Missing
+source/RTCP measurements remain `--` instead of displaying fabricated values.
+WebRTC and iPhone source controls are not available in this RTSP-only client. Its build
 automatically configures and builds the native DLL against the x64 FFmpeg SDK.
 The project has a default SDK path; if your SDK is elsewhere, provide its path
 with the `FFmpegRoot` MSBuild property as shown below.

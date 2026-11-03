@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Windows.Media;
 
 namespace WindowsRtspReceiver.Controls;
 
@@ -47,11 +49,55 @@ public sealed class ReceiverViewModel : INotifyPropertyChanged
     public string Codec { get => _codec; set => SetProperty(ref _codec, value); }
     public string VideoSize { get => _videoSize; set => SetProperty(ref _videoSize, value); }
     public string ReceiveFps { get => _receiveFps; set => SetProperty(ref _receiveFps, value); }
-    public string DecodeFps { get => _decodeFps; set => SetProperty(ref _decodeFps, value); }
-    public string RenderFps { get => _renderFps; set => SetProperty(ref _renderFps, value); }
+    public string DecodeFps
+    {
+        get => _decodeFps;
+        set
+        {
+            if (SetProperty(ref _decodeFps, value))
+            {
+                OnPropertyChanged(nameof(DecodeFpsForeground));
+            }
+        }
+    }
+    public Brush DecodeFpsForeground => GetFpsForeground(DecodeFps);
+    public string RenderFps
+    {
+        get => _renderFps;
+        set
+        {
+            if (SetProperty(ref _renderFps, value))
+            {
+                OnPropertyChanged(nameof(RenderFpsForeground));
+            }
+        }
+    }
+    public Brush RenderFpsForeground => GetFpsForeground(RenderFps);
     public string Bitrate { get => _bitrate; set => SetProperty(ref _bitrate, value); }
-    public string CaptureFps { get => _captureFps; set => SetProperty(ref _captureFps, value); }
-    public string EncodeFps { get => _encodeFps; set => SetProperty(ref _encodeFps, value); }
+    public string CaptureFps
+    {
+        get => _captureFps;
+        set
+        {
+            if (SetProperty(ref _captureFps, value))
+            {
+                OnPropertyChanged(nameof(CaptureFpsForeground));
+            }
+        }
+    }
+    public Brush CaptureFpsForeground => GetFpsForeground(CaptureFps);
+    public string EncodeFps
+    {
+        get => _encodeFps;
+        set
+        {
+            if (SetProperty(ref _encodeFps, value))
+            {
+                OnPropertyChanged(nameof(EncodeFpsForeground));
+            }
+        }
+    }
+    public Brush EncodeFpsForeground => GetFpsForeground(EncodeFps);
     public string SenderBitrate { get => _senderBitrate; set => SetProperty(ref _senderBitrate, value); }
     public string PacketLoss { get => _packetLoss; set => SetProperty(ref _packetLoss, value); }
     public string SenderPacketLoss { get => _senderPacketLoss; set => SetProperty(ref _senderPacketLoss, value); }
@@ -124,6 +170,21 @@ public sealed class ReceiverViewModel : INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    private static Brush GetFpsForeground(string fps)
+    {
+        var valueText = fps.Split(' ', 2)[0];
+        if (!double.TryParse(valueText, NumberStyles.Float, CultureInfo.CurrentCulture, out var value))
+        {
+            return Brushes.White;
+        }
+
+        return value < 100
+            ? Brushes.Red
+            : value < 120
+                ? Brushes.Yellow
+                : Brushes.White;
+    }
 }
 
 public sealed record ResolutionOption(int Width, int Height)

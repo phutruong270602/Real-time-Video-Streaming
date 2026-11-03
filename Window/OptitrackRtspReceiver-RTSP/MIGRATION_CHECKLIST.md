@@ -63,8 +63,10 @@ Mục tiêu: xây dựng một receiver C++ độc lập tại
   5353; quy tắc giới hạn LocalSubnet và profile Private/Domain.
 - [x] Cấu hình timeout, reconnect/delay và giới hạn packet queue qua các trường
   cấu hình.
-- [x] Phân biệt chỉ số RTSP có thể đo với thông số sender/WebRTC không được
-  receiver cung cấp; các thông số không có dữ liệu hiển thị N/A thay vì số giả.
+- [x] Gửi capture/encode FPS và bitrate thực từ iPhone RTSP sender qua UDP 8556;
+  dùng RTCP receiver reports để đo loss, jitter và sender RTT; client đo receiver
+  RTT theo thời gian request/response. RTSP nguồn không hỗ trợ telemetry vẫn
+  hiển thị `--` cho các chỉ số không có dữ liệu, không dùng số giả.
 
 ### Giai đoạn 3 - Kiểm thử receiver độc lập
 

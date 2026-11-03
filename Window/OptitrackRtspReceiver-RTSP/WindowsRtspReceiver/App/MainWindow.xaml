@@ -159,7 +159,7 @@
                     <TextBlock Text="{Binding Codec}" Foreground="White" />
                     <TextBlock Text="RTSP source" Foreground="#CBD5E1"
                                FontWeight="SemiBold" Margin="0,14,0,4" />
-                    <TextBlock Text="Enter the RTSP URL provided by the camera or RTSP server. A discovered Windows IP or WebRTC sender address is not an RTSP stream URL."
+                    <TextBlock Text="For live source statistics, use the iPhone RTSP sender. It provides telemetry over UDP 8556; loss, jitter and sender RTT are measured from RTCP receiver reports."
                                Foreground="#94A3B8" TextWrapping="Wrap" />
                     <TextBlock Text="Video diagnostics" Foreground="#CBD5E1"
                                FontWeight="SemiBold" Margin="0,18,0,4" />
@@ -181,14 +181,14 @@
                     <TextBlock Text="{Binding ReceiveFps}" Foreground="White"
                                FontSize="22" Margin="0,2,0,12" />
                     <TextBlock Text="Decode FPS" Foreground="#94A3B8" />
-                    <TextBlock Text="{Binding DecodeFps}" Foreground="White"
+                    <TextBlock Text="{Binding DecodeFps}" Foreground="{Binding DecodeFpsForeground}"
                                FontSize="22" Margin="0,2,0,12" />
                     <TextBlock Text="Render FPS" Foreground="#94A3B8" />
-                    <TextBlock Text="{Binding RenderFps}" Foreground="White"
+                    <TextBlock Text="{Binding RenderFps}" Foreground="{Binding RenderFpsForeground}"
                                FontSize="22" Margin="0,2,0,12" />
                     <TextBlock Text="Capture / encode FPS (source)" Foreground="#94A3B8" />
                     <TextBlock Foreground="White" TextWrapping="Wrap" Margin="0,2,0,12">
-                        <Run Text="{Binding CaptureFps}" /><Run Text=" / " /><Run Text="{Binding EncodeFps}" />
+                        <Run Text="{Binding CaptureFps}" Foreground="{Binding CaptureFpsForeground}" /><Run Text=" / " /><Run Text="{Binding EncodeFps}" Foreground="{Binding EncodeFpsForeground}" />
                     </TextBlock>
                     <TextBlock Text="Receive bitrate" Foreground="#94A3B8" />
                     <TextBlock Text="{Binding Bitrate}" Foreground="White"
@@ -230,7 +230,7 @@
                     <TextBlock Text="{Binding SessionDuration}" Foreground="White"
                                FontSize="18" Margin="0,2,0,12" />
                     <TextBlock x:Name="MetricsAvailabilityText"
-                               Text="WebRTC metrics are reported while receiving from the iPhone."
+                               Text="Waiting for RTSP source statistics."
                                Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,8,0,0" />
                 </StackPanel>
             </ScrollViewer>

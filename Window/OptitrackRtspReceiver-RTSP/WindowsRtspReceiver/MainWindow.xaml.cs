@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<(ResolutionOption Resolution, string Camera), HashSet<int>> _frameRatesByMode = new();
     private readonly ObservableCollection<RtspServer> _discoveredRtspServers = [];
     private readonly RtspServerDiscovery _rtspServerDiscovery = new();
+    private readonly RtspStatisticsClient _rtspStatisticsClient = new();
     private NativeRtspReceiver? _receiver;
     private CancellationTokenSource? _discoveryCancellation;
     private CancellationTokenSource? _bitrateDebounce;
@@ -53,6 +54,7 @@ public partial class MainWindow : Window
     private int? _appliedFrameRate;
     private bool _updatingSourceControls;
     private bool _webRtcPageLoaded;
+    private bool _rtspStatisticsActive;
 
     public MainWindow()
     {
@@ -63,6 +65,22 @@ public partial class MainWindow : Window
         DiscoveredRtspServersListBox.ItemsSource = _discoveredRtspServers;
         ApplyReceiverMode();
         _viewModel.ControlStatus = "RTSP-only mode. Enter a URL from an RTSP server.";
+        _rtspStatisticsClient.StatisticsReceived += (statistics, roundTripTimeMs) =>
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (_rtspStatisticsActive)
+                {
+                    UpdateRtspServerStatistics(statistics, roundTripTimeMs);
+                }
+            });
+        _rtspStatisticsClient.StatusChanged += status =>
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (_rtspStatisticsActive)
+                {
+                    MetricsAvailabilityText.Text = status;
+                }
+            });
 
         _statisticsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _statisticsTimer.Tick += StatisticsTimer_Tick;
@@ -269,6 +287,7 @@ public partial class MainWindow : Window
         _viewModel.ConnectionStatus = "Connecting...";
         _viewModel.Diagnostic = "Opening RTSP stream and waiting for video packets.";
         _viewModel.LastError = string.Empty;
+        ResetSourceStatistics();
 
         try
         {
@@ -321,6 +340,11 @@ public partial class MainWindow : Window
             _viewModel.Diagnostic = $"RTSP connected over {(useTcp ? "TCP" : "UDP")}.";
             _viewModel.Codec = "H.264";
             ReceiverLog.Write("CONTROL", $"RTSP start_succeeded transport={(useTcp ? "TCP" : "UDP")}");
+            if (Uri.TryCreate(url, UriKind.Absolute, out var streamUri))
+            {
+                _rtspStatisticsActive = true;
+                _rtspStatisticsClient.Start(streamUri);
+            }
             SetControls(isStarting: false, isRunning: true);
             _statisticsTimer.Start();
             _videoTimer.Start();
@@ -347,7 +371,11 @@ public partial class MainWindow : Window
         SetControls(isStarting: true, isRunning: true);
         _statisticsTimer.Stop();
         _videoTimer.Stop();
+        _rtspStatisticsActive = false;
+        _rtspStatisticsClient.Stop();
         _sessionClock.Stop();
+        ResetSourceStatistics();
+        MetricsAvailabilityText.Text = "RTSP statistics stopped.";
         if (IsWebRtcMode)
         {
             WebRtcVideoView.CoreWebView2?.PostWebMessageAsJson("""{"type":"STOP"}""");
@@ -417,6 +445,10 @@ public partial class MainWindow : Window
         {
             _statisticsTimer.Stop();
             _videoTimer.Stop();
+            _rtspStatisticsActive = false;
+            _rtspStatisticsClient.Stop();
+            ResetSourceStatistics();
+            MetricsAvailabilityText.Text = "RTSP stream stopped; statistics polling ended.";
             _sessionClock.Stop();
             SetControls(isStarting: false, isRunning: false);
         }
@@ -738,6 +770,44 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UpdateRtspServerStatistics(
+        RtspSenderStatistics statistics,
+        double receiverRoundTripTimeMs)
+    {
+        _viewModel.CaptureFps = $"{statistics.CaptureFps:0.0} FPS";
+        _viewModel.EncodeFps = $"{statistics.EncodeFps:0.0} FPS";
+        _viewModel.SenderBitrate = $"{statistics.SenderBitrateBps / 1_000_000:0.00} Mbps";
+        _viewModel.RoundTripTime = $"{receiverRoundTripTimeMs:0.0} ms";
+        if (statistics.PacketLossPercent is { } packetLossPercent)
+        {
+            _viewModel.PacketLoss = $"{packetLossPercent:0.00}%";
+        }
+        if (statistics.SenderPacketsLost is { } packetsLost)
+        {
+            _viewModel.SenderPacketLoss = $"{packetsLost:N0} packets";
+        }
+        if (statistics.JitterMs is { } jitter)
+        {
+            _viewModel.Jitter = $"{jitter:0.0} ms";
+        }
+        if (statistics.SenderRttMs is { } senderRtt)
+        {
+            _viewModel.SenderRoundTripTime = $"{senderRtt:0.0} ms";
+        }
+    }
+
+    private void ResetSourceStatistics()
+    {
+        _viewModel.CaptureFps = "--";
+        _viewModel.EncodeFps = "--";
+        _viewModel.SenderBitrate = "--";
+        _viewModel.SenderPacketLoss = "--";
+        _viewModel.SenderRoundTripTime = "--";
+        _viewModel.PacketLoss = "--";
+        _viewModel.Jitter = "--";
+        _viewModel.RoundTripTime = "--";
+    }
+
     private async Task SendSignalingMessageAsync(string payload, string messageType)
     {
         try
@@ -798,17 +868,10 @@ public partial class MainWindow : Window
         _viewModel.Codec = "--";
         MetricsAvailabilityText.Text = useWebRtc
             ? "WebRTC and iPhone source statistics are shown when reported."
-            : "Source capture and WebRTC RTP statistics are unavailable for standalone RTSP.";
+            : "RTSP sender statistics are polled from the iPhone over UDP 8556; loss, jitter and sender RTT use RTCP receiver reports.";
         if (!useWebRtc)
         {
-            _viewModel.CaptureFps = "N/A (RTSP source stats unavailable)";
-            _viewModel.EncodeFps = "N/A (RTSP source stats unavailable)";
-            _viewModel.SenderBitrate = "N/A (RTSP sender stats unavailable)";
-            _viewModel.SenderPacketLoss = "N/A (RTSP sender stats unavailable)";
-            _viewModel.SenderRoundTripTime = "N/A (RTSP sender stats unavailable)";
-            _viewModel.PacketLoss = "N/A (RTSP loss stats unavailable)";
-            _viewModel.Jitter = "N/A (RTSP jitter stats unavailable)";
-            _viewModel.RoundTripTime = "N/A (RTSP RTT stats unavailable)";
+            ResetSourceStatistics();
         }
         else
         {
@@ -1339,6 +1402,8 @@ public partial class MainWindow : Window
         _discoveryCancellation?.Cancel();
         _statisticsTimer.Stop();
         _videoTimer.Stop();
+        _rtspStatisticsActive = false;
+        _rtspStatisticsClient.Dispose();
         _sessionClock.Stop();
         WebRtcVideoView.CoreWebView2?.PostWebMessageAsJson("""{"type":"STOP"}""");
         _bitrateDebounce?.Cancel();

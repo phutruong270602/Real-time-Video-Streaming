@@ -13,19 +13,25 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
 
     let port = StreamingConfiguration.rtspPort
     private let discoveryPort: UInt16 = 8555
+    private let statisticsPort: UInt16 = 8556
+    private static let statisticsRequest = Data("GET_STATS".utf8)
 
     private let networkQueue = DispatchQueue(label: "iphone.rtsp.server.network")
     private let encoderQueue = DispatchQueue(label: "iphone.rtsp.server.encoder")
     private let settingsLock = NSLock()
+    private let statisticsLock = NSLock()
     private let imageContext = CIContext(options: [.useSoftwareRenderer: false])
     private let udpRTPPort: UInt16 = 5004
     private var listener: NWListener?
+    private var statisticsListener: NWListener?
     private var discoverySocket: Int32 = -1
     private var discoveryTimer: DispatchSourceTimer?
     private var discoverySendFailed = false
     private var client: NWConnection?
     private var clientBuffer = Data()
     private var udpSender: NWConnection?
+    private var udpRtcpConnection: NWConnection?
+    private var senderReportTimer: DispatchSourceTimer?
     private var transport: RTPTransport?
     private var sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
     private var sps: Data?
@@ -39,7 +45,21 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private var rtpSequence = UInt16.random(in: .min ... .max)
     private let ssrc = UInt32.random(in: .min ... .max)
     private var rtpPacketCount: UInt64 = 0
+    private var rtpOctetCount: UInt64 = 0
+    private var lastRtpTimestamp: UInt32 = 0
     private var encodedFrameCount: UInt64 = 0
+    private var capturedFramesForStatistics: UInt64 = 0
+    private var encodedFramesForStatistics: UInt64 = 0
+    private var sentBytesForStatistics: UInt64 = 0
+    private var previousCapturedFramesForStatistics: UInt64 = 0
+    private var previousEncodedFramesForStatistics: UInt64 = 0
+    private var previousSentBytesForStatistics: UInt64 = 0
+    private var statisticsSampleDate = Date()
+    private var receiverPacketLossPercent: Double?
+    private var senderPacketsLost: Int?
+    private var jitterMs: Double?
+    private var senderRoundTripTimeMs: Double?
+    private var senderReportDates: [UInt32: Date] = [:]
     private var nalLengthFieldBytes = 4
     private var isPlaying = false
     private var configuredServerAddress = RTSPServer.localIPv4Address() ?? "0.0.0.0"
@@ -119,6 +139,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                 }
                 self.listener = listener
                 listener.start(queue: self.networkQueue)
+                self.startStatisticsListener()
                 self.setRunning(true, status: "Starting RTSP server...")
                 AppLogger.info(
                     "RTSP server starting: url=\(self.streamURL) transport=TCP rtsp_port=\(self.port) discovery=UDP_subnet_broadcast discovery_udp_port=\(self.discoveryPort) service_name=\"\(serviceName)\"",
@@ -192,6 +213,10 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private func stopOnNetworkQueue(camera: CameraManager?) {
         camera?.onFrame = nil
         stopDiscoveryBroadcast()
+        stopSenderReportTimer()
+        statisticsListener?.newConnectionHandler = nil
+        statisticsListener?.cancel()
+        statisticsListener = nil
         listener?.newConnectionHandler = nil
         listener?.cancel()
         listener = nil
@@ -200,9 +225,12 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         client = nil
         udpSender?.cancel()
         udpSender = nil
+        udpRtcpConnection?.cancel()
+        udpRtcpConnection = nil
         clientBuffer.removeAll()
         transport = nil
         isPlaying = false
+        resetStatistics()
         sps = nil
         pps = nil
         encoderQueue.async { [weak self] in
@@ -364,13 +392,290 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         discoveryBroadcastSent = false
     }
 
+    private func startStatisticsListener() {
+        guard statisticsListener == nil else { return }
+        do {
+            let listener = try NWListener(
+                using: .udp,
+                on: NWEndpoint.Port(rawValue: statisticsPort)!
+            )
+            listener.newConnectionHandler = { [weak self] connection in
+                guard let self else {
+                    connection.cancel()
+                    return
+                }
+                connection.start(queue: self.networkQueue)
+                self.receiveStatisticsRequest(from: connection)
+            }
+            listener.stateUpdateHandler = { [weak self] state in
+                if case .failed(let error) = state {
+                    guard let self else { return }
+                    AppLogger.error(
+                        "Statistics listener failed on UDP \(self.statisticsPort): \(error.localizedDescription)",
+                        category: "RTSP"
+                    )
+                }
+            }
+            statisticsListener = listener
+            listener.start(queue: networkQueue)
+            AppLogger.info(
+                "RTSP statistics listener starting on UDP \(statisticsPort)",
+                category: "RTSP"
+            )
+        } catch {
+            AppLogger.error(
+                "Could not start RTSP statistics listener on UDP \(statisticsPort): \(error.localizedDescription)",
+                category: "RTSP"
+            )
+        }
+    }
+
+    private func receiveStatisticsRequest(from connection: NWConnection) {
+        connection.receiveMessage { [weak self, weak connection] data, _, isComplete, error in
+            guard let self, let connection else { return }
+            if let error {
+                AppLogger.warning(
+                    "RTSP statistics request failed: \(error.localizedDescription)",
+                    category: "RTSP"
+                )
+                connection.cancel()
+                return
+            }
+            if let data, !data.isEmpty {
+                if data == Self.statisticsRequest {
+                    do {
+                        let response = try JSONEncoder().encode(self.statisticsMessage())
+                        connection.send(
+                            content: response,
+                            completion: .contentProcessed { sendError in
+                                if let sendError {
+                                    AppLogger.warning(
+                                        "RTSP statistics response failed: \(sendError.localizedDescription)",
+                                        category: "RTSP"
+                                    )
+                                }
+                            }
+                        )
+                    } catch {
+                        AppLogger.error(
+                            "Could not encode RTSP statistics: \(error.localizedDescription)",
+                            category: "RTSP"
+                        )
+                    }
+                }
+            }
+            if isComplete {
+                connection.cancel()
+            } else {
+                self.receiveStatisticsRequest(from: connection)
+            }
+        }
+    }
+
+    private func statisticsMessage() -> RTSPStatisticsMessage {
+        let now = Date()
+        statisticsLock.lock()
+        let elapsed = max(now.timeIntervalSince(statisticsSampleDate), 0.001)
+        let captureFps = Double(
+            capturedFramesForStatistics - previousCapturedFramesForStatistics
+        ) / elapsed
+        let encodeFps = Double(
+            encodedFramesForStatistics - previousEncodedFramesForStatistics
+        ) / elapsed
+        let bitrateBps = Double(
+            sentBytesForStatistics - previousSentBytesForStatistics
+        ) * 8 / elapsed
+        previousCapturedFramesForStatistics = capturedFramesForStatistics
+        previousEncodedFramesForStatistics = encodedFramesForStatistics
+        previousSentBytesForStatistics = sentBytesForStatistics
+        statisticsSampleDate = now
+        statisticsLock.unlock()
+
+        return RTSPStatisticsMessage(
+            type: "STATS",
+            captureFps: captureFps,
+            encodeFps: encodeFps,
+            senderBitrateBps: bitrateBps,
+            packetLossPercent: receiverPacketLossPercent,
+            senderPacketsLost: senderPacketsLost,
+            jitterMs: jitterMs,
+            senderRttMs: senderRoundTripTimeMs
+        )
+    }
+
+    private func resetStatistics() {
+        statisticsLock.lock()
+        capturedFramesForStatistics = 0
+        encodedFramesForStatistics = 0
+        sentBytesForStatistics = 0
+        previousCapturedFramesForStatistics = 0
+        previousEncodedFramesForStatistics = 0
+        previousSentBytesForStatistics = 0
+        statisticsSampleDate = Date()
+        statisticsLock.unlock()
+        rtpPacketCount = 0
+        rtpOctetCount = 0
+        receiverPacketLossPercent = nil
+        senderPacketsLost = nil
+        jitterMs = nil
+        senderRoundTripTimeMs = nil
+        senderReportDates.removeAll()
+    }
+
+    private func receiveRtcp(from connection: NWConnection) {
+        connection.receiveMessage { [weak self, weak connection] data, _, isComplete, error in
+            guard let self, let connection,
+                  self.udpRtcpConnection === connection else { return }
+            if let error {
+                AppLogger.warning(
+                    "RTCP receive failed: \(error.localizedDescription)",
+                    category: "RTSP"
+                )
+                return
+            }
+            if let data, !data.isEmpty {
+                self.processRtcpPacket(data)
+            }
+            if !isComplete {
+                self.receiveRtcp(from: connection)
+            }
+        }
+    }
+
+    private func processRtcpPacket(_ packet: Data) {
+        let bytes = [UInt8](packet)
+        var offset = 0
+        while offset + 4 <= bytes.count {
+            let header = bytes[offset]
+            let packetType = bytes[offset + 1]
+            let packetLength = ((Int(bytes[offset + 2]) << 8 | Int(bytes[offset + 3])) + 1) * 4
+            guard header >> 6 == 2,
+                  packetLength >= 4,
+                  offset + packetLength <= bytes.count else {
+                return
+            }
+
+            if packetType == 201 {
+                let reportCount = Int(header & 0x1f)
+                guard packetLength >= 8 + reportCount * 24 else {
+                    offset += packetLength
+                    continue
+                }
+                for index in 0 ..< reportCount {
+                    let blockOffset = offset + 8 + index * 24
+                    guard readUInt32(bytes, at: blockOffset) == ssrc else { continue }
+                    let fractionLost = Double(bytes[blockOffset + 4])
+                    var lost = (Int(bytes[blockOffset + 5]) << 16)
+                        | (Int(bytes[blockOffset + 6]) << 8)
+                        | Int(bytes[blockOffset + 7])
+                    if lost & 0x80_0000 != 0 {
+                        lost |= ~0xff_ffff
+                    }
+                    let jitter = readUInt32(bytes, at: blockOffset + 12)
+                    let lastSenderReport = readUInt32(bytes, at: blockOffset + 16)
+                    let delaySinceLastSenderReport = readUInt32(bytes, at: blockOffset + 20)
+                    receiverPacketLossPercent = fractionLost * 100 / 256
+                    senderPacketsLost = max(0, lost)
+                    jitterMs = Double(jitter) * 1000 / 90_000
+                    if let reportDate = senderReportDates[lastSenderReport] {
+                        let roundTripSeconds = Date().timeIntervalSince(reportDate)
+                            - Double(delaySinceLastSenderReport) / 65_536
+                        senderRoundTripTimeMs = max(0, roundTripSeconds * 1000)
+                    }
+                }
+            }
+            offset += packetLength
+        }
+    }
+
+    private func startSenderReportTimer() {
+        stopSenderReportTimer()
+        let timer = DispatchSource.makeTimerSource(queue: networkQueue)
+        timer.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1))
+        timer.setEventHandler { [weak self] in
+            self?.sendSenderReport()
+        }
+        senderReportTimer = timer
+        timer.resume()
+    }
+
+    private func stopSenderReportTimer() {
+        senderReportTimer?.cancel()
+        senderReportTimer = nil
+    }
+
+    private func sendSenderReport() {
+        guard isPlaying else { return }
+        let unixTime = Date().timeIntervalSince1970
+        let seconds = UInt32(unixTime + 2_208_988_800)
+        let fractionalSeconds = UInt32(
+            (unixTime.truncatingRemainder(dividingBy: 1) * 4_294_967_296).rounded(.down)
+        )
+        let compactNtp = (seconds << 16) | (fractionalSeconds >> 16)
+        var report = Data([0x80, 200, 0, 6])
+        appendUInt32(ssrc, to: &report)
+        appendUInt32(seconds, to: &report)
+        appendUInt32(fractionalSeconds, to: &report)
+        appendUInt32(lastRtpTimestamp, to: &report)
+        appendUInt32(UInt32(truncatingIfNeeded: rtpPacketCount), to: &report)
+        appendUInt32(UInt32(truncatingIfNeeded: rtpOctetCount), to: &report)
+        senderReportDates[compactNtp] = Date()
+        if senderReportDates.count > 16,
+           let oldest = senderReportDates.min(by: { $0.value < $1.value })?.key {
+            senderReportDates.removeValue(forKey: oldest)
+        }
+
+        switch transport {
+        case .tcp(let channel):
+            guard let client else { return }
+            var framed = Data([0x24, channel &+ 1, 0, UInt8(report.count)])
+            framed.append(report)
+            client.send(content: framed, completion: .contentProcessed { error in
+                if let error {
+                    AppLogger.warning(
+                        "RTCP sender report failed: \(error.localizedDescription)",
+                        category: "RTSP"
+                    )
+                }
+            })
+        case .udp:
+            udpRtcpConnection?.send(content: report, completion: .contentProcessed { error in
+                if let error {
+                    AppLogger.warning(
+                        "RTCP sender report failed: \(error.localizedDescription)",
+                        category: "RTSP"
+                    )
+                }
+            })
+        case .none:
+            break
+        }
+    }
+
+    private func readUInt32(_ bytes: [UInt8], at offset: Int) -> UInt32 {
+        (UInt32(bytes[offset]) << 24)
+            | (UInt32(bytes[offset + 1]) << 16)
+            | (UInt32(bytes[offset + 2]) << 8)
+            | UInt32(bytes[offset + 3])
+    }
+
+    private func appendUInt32(_ value: UInt32, to data: inout Data) {
+        data.append(UInt8(truncatingIfNeeded: value >> 24))
+        data.append(UInt8(truncatingIfNeeded: value >> 16))
+        data.append(UInt8(truncatingIfNeeded: value >> 8))
+        data.append(UInt8(truncatingIfNeeded: value))
+    }
+
     private func accept(_ connection: NWConnection) {
         if let existingClient = client {
             existingClient.stateUpdateHandler = nil
             existingClient.cancel()
         }
+        stopSenderReportTimer()
         udpSender?.cancel()
         udpSender = nil
+        udpRtcpConnection?.cancel()
+        udpRtcpConnection = nil
         transport = nil
         isPlaying = false
         clientBuffer.removeAll()
@@ -424,10 +729,18 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         while !clientBuffer.isEmpty {
             if clientBuffer.first == 0x24 {
                 guard clientBuffer.count >= 4 else { return }
+                let channel = clientBuffer[clientBuffer.startIndex + 1]
                 let interleavedLength = Int(clientBuffer[clientBuffer.startIndex + 2]) << 8
                     | Int(clientBuffer[clientBuffer.startIndex + 3])
                 let frameLength = 4 + interleavedLength
                 guard clientBuffer.count >= frameLength else { return }
+                if case let .tcp(rtpChannel) = transport,
+                   channel == (rtpChannel &+ 1) {
+                    let packet = clientBuffer.subdata(
+                        in: clientBuffer.startIndex + 4 ..< clientBuffer.startIndex + frameLength
+                    )
+                    processRtcpPacket(packet)
+                }
                 clientBuffer.removeSubrange(clientBuffer.startIndex ..< clientBuffer.startIndex + frameLength)
                 continue
             }
@@ -531,7 +844,9 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                 sendResponse(to: connection, status: "455 Method Not Valid in This State", cseq: cseq)
                 return
             }
+            resetStatistics()
             isPlaying = true
+            startSenderReportTimer()
             updateStatus("Streaming RTSP to client")
             sendResponse(
                 to: connection,
@@ -547,13 +862,17 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             AppLogger.info("RTSP PLAY accepted", category: "RTSP")
         case "PAUSE":
             isPlaying = false
+            stopSenderReportTimer()
             updateStatus("RTSP client paused")
             sendResponse(to: connection, status: "200 OK", cseq: cseq, headers: ["Session": sessionID])
         case "TEARDOWN":
             isPlaying = false
+            stopSenderReportTimer()
             transport = nil
             udpSender?.cancel()
             udpSender = nil
+            udpRtcpConnection?.cancel()
+            udpRtcpConnection = nil
             sendResponse(to: connection, status: "200 OK", cseq: cseq, headers: ["Session": sessionID])
             updateStatus("RTSP server ready; client disconnected")
         case "GET_PARAMETER":
@@ -571,13 +890,16 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         let lowercased = header.lowercased()
         if lowercased.contains("rtp/avp/tcp") {
             let channels = parameter(named: "interleaved", in: header) ?? "0-1"
-            guard let channel = channels.split(separator: "-").first.flatMap({ UInt8($0) }) else {
+            guard let channel = channels.split(separator: "-").first.flatMap({ UInt8($0) }),
+                  channel < UInt8.max else {
                 sendResponse(to: connection, status: "461 Unsupported Transport", cseq: cseq)
                 return
             }
             transport = .tcp(channel: channel)
             udpSender?.cancel()
             udpSender = nil
+            udpRtcpConnection?.cancel()
+            udpRtcpConnection = nil
             AppLogger.info("RTSP transport selected=TCP interleaved_channel=\(channel)", category: "RTSP")
             sendResponse(
                 to: connection,
@@ -595,6 +917,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
               let clientPorts = parameter(named: "client_port", in: header),
               let rtpPortText = clientPorts.split(separator: "-").first.map(String.init),
               let rtpPort = UInt16(rtpPortText),
+              let clientRtcpPort = UInt16(exactly: Int(rtpPort) + 1),
               let endpoint = connection.currentPath?.remoteEndpoint,
               case let .hostPort(host, _) = endpoint,
               let remotePort = NWEndpoint.Port(rawValue: rtpPort),
@@ -619,9 +942,39 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             to: .hostPort(host: host, port: remotePort),
             using: parameters
         )
+        let rtcpParameters = NWParameters.udp
+        rtcpParameters.requiredLocalEndpoint = .hostPort(
+            host: localHost,
+            port: NWEndpoint.Port(rawValue: udpRTPPort &+ 1)!
+        )
+        let rtcpConnection = NWConnection(
+            to: .hostPort(
+                host: host,
+                port: NWEndpoint.Port(rawValue: clientRtcpPort)!
+            ),
+            using: rtcpParameters
+        )
         udpSender?.cancel()
         udpSender = sender
+        udpRtcpConnection?.cancel()
+        udpRtcpConnection = rtcpConnection
         transport = .udp
+        rtcpConnection.stateUpdateHandler = { [weak self, weak rtcpConnection] state in
+            guard let self, let rtcpConnection,
+                  self.udpRtcpConnection === rtcpConnection else { return }
+            switch state {
+            case .ready:
+                self.receiveRtcp(from: rtcpConnection)
+            case .failed(let error):
+                AppLogger.warning(
+                    "RTCP receive connection failed: \(error.localizedDescription)",
+                    category: "RTSP"
+                )
+            default:
+                break
+            }
+        }
+        rtcpConnection.start(queue: networkQueue)
         sender.stateUpdateHandler = { [weak self, weak connection, weak sender] state in
             guard let self, let connection, let sender, self.udpSender === sender else { return }
             switch state {
@@ -699,14 +1052,20 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         connection.cancel()
         clientBuffer.removeAll()
         isPlaying = false
+        stopSenderReportTimer()
         transport = nil
         udpSender?.cancel()
         udpSender = nil
+        udpRtcpConnection?.cancel()
+        udpRtcpConnection = nil
         updateStatus("RTSP server ready; waiting for a client")
         AppLogger.info("RTSP client disconnected", category: "RTSP")
     }
 
     private func encode(_ sampleBuffer: CMSampleBuffer) {
+        statisticsLock.lock()
+        capturedFramesForStatistics += 1
+        statisticsLock.unlock()
         encoderQueue.async { [weak self] in
             guard let self,
                   let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
@@ -947,6 +1306,9 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                 self.nalLengthFieldBytes = lengthFieldBytes
             }
             self.encodedFrameCount += 1
+            self.statisticsLock.lock()
+            self.encodedFramesForStatistics += 1
+            self.statisticsLock.unlock()
             if self.encodedFrameCount == 1 || self.encodedFrameCount % 150 == 0 {
                 AppLogger.info(
                     "RTSP H.264 frame=\(self.encodedFrameCount) bytes=\(encodedData.count) keyframe=\(isKeyFrame)",
@@ -979,6 +1341,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
 
         let scaledTimestamp = CMTimeConvertScale(timestamp, timescale: 90_000, method: .default).value
         let rtpTimestamp = UInt32(truncatingIfNeeded: scaledTimestamp)
+        lastRtpTimestamp = rtpTimestamp
         for (index, nal) in nals.enumerated() {
             let isLastNal = index == nals.count - 1
             for packet in packetize(nal, timestamp: rtpTimestamp, markerOnLast: isLastNal) {
@@ -1063,6 +1426,11 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             return
         }
         rtpPacketCount += 1
+        let payloadSize = UInt64(max(0, packet.count - 12))
+        rtpOctetCount += payloadSize
+        statisticsLock.lock()
+        sentBytesForStatistics += UInt64(packet.count)
+        statisticsLock.unlock()
         if rtpPacketCount == 1 || rtpPacketCount % 1_500 == 0 {
             AppLogger.info("RTSP RTP packets sent=\(rtpPacketCount)", category: "RTSP")
         }
@@ -1164,6 +1532,17 @@ private struct IPv4BroadcastConfiguration {
 private enum RTPTransport {
     case tcp(channel: UInt8)
     case udp
+}
+
+private struct RTSPStatisticsMessage: Encodable {
+    let type: String
+    let captureFps: Double
+    let encodeFps: Double
+    let senderBitrateBps: Double
+    let packetLossPercent: Double?
+    let senderPacketsLost: Int?
+    let jitterMs: Double?
+    let senderRttMs: Double?
 }
 
 private func rtspCompressionOutputCallback(
