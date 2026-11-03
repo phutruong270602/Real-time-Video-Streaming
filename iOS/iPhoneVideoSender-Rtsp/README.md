@@ -21,6 +21,14 @@ address on UDP port `8555`; Windows uses the packet's source IP to build the
 RTSP URL. Both devices must be on the same LAN, and Windows must allow inbound
 UDP `8555` on its Private/Domain profile. Guest Wi-Fi, VPN routing, or wireless
 client isolation can still prevent broadcast discovery.
+
+The RTSP listener also accepts the HTTP camera-control requests used by
+`OptitrackCameraDLL` on that same TCP port. It implements `/ping`,
+`/camera-toggle`, and `/camera-settings`; supported frame-rate updates are
+applied to the active iPhone camera. Speed, ISO, zoom, audio, bandwidth, and
+app-exit controls are not supported. Use the same `rtsp://<iPhone-LAN-IP>:8554/`
+URL in `RtspCamera` and the Windows receiver.
+
 The sender provides live capture/encode FPS and transmitted bitrate through a
 statistics request/reply endpoint on UDP port `8556`. RTCP sender reports are
 still used for the RTSP stream, but packet-loss, jitter, and RTT metrics are not

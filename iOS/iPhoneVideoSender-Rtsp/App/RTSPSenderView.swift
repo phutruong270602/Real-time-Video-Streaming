@@ -35,7 +35,7 @@ struct RTSPSenderView: View {
                                 .font(.system(.footnote, design: .monospaced))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("Connect the Windows RTSP receiver to this URL. Keep both devices on the same local network.")
+                            Text("Use this URL in the Windows receiver or OptitrackCameraDLL. The server also provides the camera HTTP control endpoints on this port. Keep both devices on the same local network.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

@@ -64,7 +64,7 @@ public partial class MainWindow : Window
         VideoImage.Stretch = Stretch.Uniform;
         DiscoveredRtspServersListBox.ItemsSource = _discoveredRtspServers;
         ApplyReceiverMode();
-        _viewModel.ControlStatus = "RTSP-only mode. Enter a URL from an RTSP server.";
+        _viewModel.ControlStatus = "Discover the iPhone or enter its RTSP URL. The same URL can be used by OptitrackCameraDLL.";
         _rtspStatisticsClient.StatisticsReceived += statistics =>
             Dispatcher.BeginInvoke(() =>
             {
@@ -842,7 +842,7 @@ public partial class MainWindow : Window
         VideoPlaceholderTitle.Text = useWebRtc ? "Waiting for iPhone video" : "Waiting for RTSP video";
         VideoPlaceholderMessage.Text = useWebRtc
             ? "Connect the iPhone, then press Start"
-            : "Enter a camera URL and press Start";
+            : "Discover the iPhone or enter its RTSP URL, then press Start";
         ReceiverTypeText.Text = useWebRtc ? "WebRTC / WebView2" : "Native C++ / FFmpeg";
         _viewModel.Codec = "--";
         MetricsAvailabilityText.Text = useWebRtc

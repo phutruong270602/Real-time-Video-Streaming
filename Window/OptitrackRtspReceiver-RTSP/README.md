@@ -1,10 +1,9 @@
 # Optitrack RTSP Receiver
 
 Native C++ RTSP/H.264 receiver with an RTSP-only C# WPF monitoring application.
-The standalone receiver is intended to be tested before integration with
-`OptitrackCameraDLL`; it does not include camera HTTP settings or audio. Enter
-an RTSP URL from a camera or RTSP server to connect. An iPhone's discovered
-Windows address or WebRTC sender does not provide an RTSP stream.
+Enter an RTSP URL from a camera or RTSP server to connect. An iPhone's
+discovered Windows address or WebRTC sender does not provide an RTSP stream.
+The Windows receiver itself does not implement camera HTTP settings or audio.
 
 ## Requirements
 
@@ -109,3 +108,10 @@ it `AV_PIX_FMT_YUVJ420P` for its existing GPU/CPU H.264 decoder path. The receiv
 does not depend on DLL headers, OpenCV, WPF, or WebView2; an adapter can map the
 packet payload and timestamp into the existing frame queue. Verify the camera's
 H.264 packetization and decoder behavior before replacing the old path.
+
+The iPhone sender can also be used directly by the existing `RtspCamera` client:
+both RTSP and the client's HTTP `/ping`, `/camera-toggle`, and `/camera-settings`
+requests use the sender's TCP port `8554`. Use the same
+`rtsp://<iPhone-LAN-IP>:8554/` URL in the DLL and this Windows monitor. The iPhone
+sender supports frame-rate changes; its speed, ISO, zoom, audio, bandwidth, and
+app-exit controls are not implemented.

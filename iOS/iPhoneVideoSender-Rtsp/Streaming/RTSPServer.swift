@@ -29,7 +29,9 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private var discoveryTimer: DispatchSourceTimer?
     private var discoverySendFailed = false
     private var client: NWConnection?
-    private var clientBuffer = Data()
+    private var connections: [ObjectIdentifier: NWConnection] = [:]
+    private var connectionBuffers: [ObjectIdentifier: Data] = [:]
+    private var pendingHTTPResponses: Set<ObjectIdentifier> = []
     private var udpSender: NWConnection?
     private var udpRtcpConnection: NWConnection?
     private var senderReportTimer: DispatchSourceTimer?
@@ -58,6 +60,8 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private var statisticsSampleDate = Date()
     private var nalLengthFieldBytes = 4
     private var isPlaying = false
+    private var isStreamingEnabled = true
+    private weak var sourceCamera: CameraManager?
     private var configuredServerAddress = RTSPServer.localIPv4Address() ?? "0.0.0.0"
 
     var streamURL: String {
@@ -74,6 +78,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
 
             self.settingsLock.lock()
             self.configuredServerAddress = Self.localIPv4Address() ?? "0.0.0.0"
+            self.sourceCamera = camera
             self.settingsLock.unlock()
             self.settingsLock.lock()
             self.configuredFrameRate = camera.selectedFPS
@@ -216,17 +221,23 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         listener?.newConnectionHandler = nil
         listener?.cancel()
         listener = nil
-        client?.stateUpdateHandler = nil
-        client?.cancel()
+        connections.values.forEach {
+            $0.stateUpdateHandler = nil
+            $0.cancel()
+        }
+        connections.removeAll()
         client = nil
+        connectionBuffers.removeAll()
+        pendingHTTPResponses.removeAll()
         updateClientConnection(false)
         udpSender?.cancel()
         udpSender = nil
         udpRtcpConnection?.cancel()
         udpRtcpConnection = nil
-        clientBuffer.removeAll()
         transport = nil
         isPlaying = false
+        isStreamingEnabled = true
+        sourceCamera = nil
         resetStatistics()
         sps = nil
         pps = nil
@@ -578,34 +589,20 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     }
 
     private func accept(_ connection: NWConnection) {
-        updateClientConnection(false)
-        if let existingClient = client {
-            existingClient.stateUpdateHandler = nil
-            existingClient.cancel()
-        }
-        stopSenderReportTimer()
-        udpSender?.cancel()
-        udpSender = nil
-        udpRtcpConnection?.cancel()
-        udpRtcpConnection = nil
-        transport = nil
-        isPlaying = false
-        clientBuffer.removeAll()
-        sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        client = connection
+        let identifier = ObjectIdentifier(connection)
+        connections[identifier] = connection
+        connectionBuffers[identifier] = Data()
         AppLogger.info(
-            "RTSP incoming client: endpoint=\(connection.endpoint) server_url=\(streamURL)",
+            "Incoming RTSP/HTTP client: endpoint=\(connection.endpoint) server_url=\(streamURL)",
             category: "RTSP"
         )
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self, let connection else { return }
             switch state {
             case .ready:
-                self.updateClientConnection(true)
-                self.updateStatus("RTSP client connected")
                 self.receive(from: connection)
             case .failed(let error):
-                self.updateStatus("RTSP client disconnected: \(error.localizedDescription)")
+                AppLogger.warning("RTSP/HTTP client disconnected: \(error.localizedDescription)", category: "RTSP")
                 self.closeClient(connection)
             case .cancelled:
                 self.closeClient(connection)
@@ -619,16 +616,20 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
 
     private func receive(from connection: NWConnection) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self, weak connection] data, _, isComplete, error in
-            guard let self, let connection, self.client === connection else { return }
+            guard let self, let connection,
+                  self.connections[ObjectIdentifier(connection)] === connection else { return }
             if let error {
-                AppLogger.warning("RTSP client receive failed: \(error.localizedDescription)", category: "RTSP")
+                AppLogger.warning("RTSP/HTTP client receive failed: \(error.localizedDescription)", category: "RTSP")
                 self.closeClient(connection)
                 return
             }
             if let data, !data.isEmpty {
-                self.clientBuffer.append(data)
+                let identifier = ObjectIdentifier(connection)
+                self.connectionBuffers[identifier, default: Data()].append(data)
                 self.processRequests(from: connection)
             }
+            let identifier = ObjectIdentifier(connection)
+            guard !self.pendingHTTPResponses.contains(identifier) else { return }
             if isComplete {
                 self.closeClient(connection)
             } else {
@@ -639,18 +640,25 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
 
     private func processRequests(from connection: NWConnection) {
         let delimiter = Data("\r\n\r\n".utf8)
-        while !clientBuffer.isEmpty {
-            if clientBuffer.first == 0x24 {
-                guard clientBuffer.count >= 4 else { return }
-                let interleavedLength = Int(clientBuffer[clientBuffer.startIndex + 2]) << 8
-                    | Int(clientBuffer[clientBuffer.startIndex + 3])
+        let identifier = ObjectIdentifier(connection)
+        while connectionBuffers[identifier]?.isEmpty == false {
+            guard var buffer = connectionBuffers[identifier] else { return }
+            if buffer.first == 0x24 {
+                guard buffer.count >= 4 else { return }
+                guard client === connection else {
+                    closeClient(connection)
+                    return
+                }
+                let interleavedLength = Int(buffer[buffer.startIndex + 2]) << 8
+                    | Int(buffer[buffer.startIndex + 3])
                 let frameLength = 4 + interleavedLength
-                guard clientBuffer.count >= frameLength else { return }
-                clientBuffer.removeSubrange(clientBuffer.startIndex ..< clientBuffer.startIndex + frameLength)
+                guard buffer.count >= frameLength else { return }
+                buffer.removeSubrange(buffer.startIndex ..< buffer.startIndex + frameLength)
+                connectionBuffers[identifier] = buffer
                 continue
             }
-            guard let headerRange = clientBuffer.range(of: delimiter) else { return }
-            let headerData = clientBuffer.subdata(in: clientBuffer.startIndex ..< headerRange.lowerBound)
+            guard let headerRange = buffer.range(of: delimiter) else { return }
+            let headerData = buffer.subdata(in: buffer.startIndex ..< headerRange.lowerBound)
             guard let headerText = String(data: headerData, encoding: .utf8) else {
                 closeClient(connection)
                 return
@@ -671,20 +679,205 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             )
             let bodyLength = Int(headers["content-length"] ?? "0") ?? 0
             let requestLength = headerRange.upperBound + bodyLength
-            guard clientBuffer.count >= requestLength else { return }
-            clientBuffer.removeSubrange(clientBuffer.startIndex ..< requestLength)
+            guard buffer.count >= requestLength else { return }
+            let body = buffer.subdata(in: headerRange.upperBound ..< requestLength)
+            buffer.removeSubrange(buffer.startIndex ..< requestLength)
+            connectionBuffers[identifier] = buffer
 
             let fields = requestLine.split(separator: " ")
-            guard fields.count >= 2 else {
+            guard fields.count >= 3 else {
                 sendResponse(to: connection, status: "400 Bad Request", cseq: headers["cseq"])
                 continue
             }
-            handleRequest(
-                method: String(fields[0]).uppercased(),
-                url: String(fields[1]),
-                headers: headers,
-                connection: connection
+            let method = String(fields[0]).uppercased()
+            let url = String(fields[1])
+            let version = String(fields[2]).uppercased()
+            if version.hasPrefix("HTTP/") {
+                pendingHTTPResponses.insert(identifier)
+                handleHTTPAPIRequest(
+                    method: method,
+                    url: url,
+                    body: body,
+                    connection: connection
+                )
+                return
+            }
+            guard version.hasPrefix("RTSP/") else {
+                closeClient(connection)
+                return
+            }
+            if client !== connection {
+                activateRTSPClient(connection)
+            }
+            handleRequest(method: method, url: url, headers: headers, connection: connection)
+        }
+    }
+
+    private func activateRTSPClient(_ connection: NWConnection) {
+        if let existingClient = client, existingClient !== connection {
+            closeClient(existingClient)
+        }
+        stopSenderReportTimer()
+        udpSender?.cancel()
+        udpSender = nil
+        udpRtcpConnection?.cancel()
+        udpRtcpConnection = nil
+        transport = nil
+        isPlaying = false
+        sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        client = connection
+        updateClientConnection(true)
+        updateStatus("RTSP client connected")
+        AppLogger.info("RTSP client connected: endpoint=\(connection.endpoint)", category: "RTSP")
+    }
+
+    private func handleHTTPAPIRequest(
+        method: String,
+        url: String,
+        body: Data,
+        connection: NWConnection
+    ) {
+        let rawPath = URLComponents(string: url)?.path ?? "/"
+        let path = "/" + rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        AppLogger.info("Camera API request method=\(method) path=\(path)", category: "RTSP")
+        guard method == "GET" || method == "POST" else {
+            sendHTTPResponse(to: connection, status: "405 Method Not Allowed", object: [
+                "message": "Only GET and POST are supported."
+            ])
+            return
+        }
+
+        let request: [String: Any]
+        if method == "POST", !body.isEmpty {
+            do {
+                guard let object = try JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+                    sendHTTPResponse(to: connection, status: "400 Bad Request", object: [
+                        "message": "Request body must be a JSON object."
+                    ])
+                    return
+                }
+                request = object
+            } catch {
+                sendHTTPResponse(to: connection, status: "400 Bad Request", object: [
+                    "message": "Invalid JSON request body."
+                ])
+                return
+            }
+        } else {
+            request = [:]
+        }
+
+        switch path {
+        case "/ping":
+            sendHTTPResponse(to: connection, object: ["message": "pong"])
+        case "/camera-toggle":
+            let shouldStart = request["start"] as? Bool ?? true
+            if shouldStart {
+                isStreamingEnabled = true
+                sendHTTPResponse(to: connection, object: ["message": "camera is already running"])
+            } else {
+                isStreamingEnabled = false
+                isPlaying = false
+                stopSenderReportTimer()
+                sendHTTPResponse(to: connection, object: ["message": "camera did stop"])
+            }
+        case "/camera-settings" where method == "GET":
+            sendHTTPResponse(to: connection, object: cameraSettingsResponse())
+        case "/camera-settings":
+            updateCameraSettings(request, connection: connection)
+        case "/camera-autozoom":
+            sendHTTPResponse(to: connection, status: "501 Not Implemented", object: [
+                "message": "Automatic zoom is not supported by the iPhone sender."
+            ])
+        case "/audio", "/bandwidth", "/exit":
+            sendHTTPResponse(to: connection, status: "501 Not Implemented", object: [
+                "message": "This camera API is not supported by the iPhone sender."
+            ])
+        default:
+            sendHTTPResponse(to: connection, status: "404 Not Found", object: [
+                "message": "The requested resource was not found."
+            ])
+        }
+    }
+
+    private func cameraSettingsResponse() -> [String: Any] {
+        let frameRates = sourceCamera?.availableFrameRates ?? [currentSettings().frameRate]
+        let currentFrameRate = sourceCamera?.selectedFPS ?? currentSettings().frameRate
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        return [
+            "speed": ["min": 1, "max": 1, "current": 1],
+            "iso": ["min": 1, "max": 1, "current": 1],
+            "zoom": ["min": 1.0, "max": 1.0, "current": 1.0],
+            "frameRate": [
+                "min": frameRates.min() ?? currentFrameRate,
+                "max": frameRates.max() ?? currentFrameRate,
+                "current": currentFrameRate
+            ],
+            "deviceInfo": [
+                "appVersion": appVersion,
+                "tcpSupport": true,
+                "device": "iPhone"
+            ]
+        ]
+    }
+
+    private func updateCameraSettings(_ request: [String: Any], connection: NWConnection) {
+        let exposureSettingChanged = ["speed", "iso"].contains { key in
+            guard let value = request[key] as? NSNumber else { return false }
+            return value.intValue != 1
+        }
+        let zoomChanged = (request["zoom"] as? NSNumber).map { $0.doubleValue != 1.0 } ?? false
+        if exposureSettingChanged || zoomChanged {
+            sendHTTPResponse(to: connection, object: [
+                "code": "1",
+                "message": "The iPhone sender supports frameRate changes only; speed, ISO, and zoom are fixed."
+            ])
+            return
+        }
+
+        if let frameRate = request["frameRate"] as? Int {
+            let supportedRates = sourceCamera?.availableFrameRates ?? [currentSettings().frameRate]
+            guard supportedRates.contains(frameRate), let sourceCamera else {
+                sendHTTPResponse(to: connection, object: [
+                    "code": "1",
+                    "message": "The requested frame rate is not supported by the active iPhone camera."
+                ])
+                return
+            }
+            sourceCamera.setFrameRate(frameRate)
+            updateVideoSettings(
+                frameRate: frameRate,
+                bitrate: currentSettings().bitrate,
+                resolution: sourceCamera.selectedResolution
             )
+        }
+
+        sendHTTPResponse(to: connection, object: ["code": 0, "message": "success"])
+    }
+
+    private func sendHTTPResponse(
+        to connection: NWConnection,
+        status: String = "200 OK",
+        object: [String: Any]
+    ) {
+        do {
+            let body = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+            var response = "HTTP/1.1 \(status)\r\n"
+            response += "Content-Type: application/json; charset=utf-8\r\n"
+            response += "Content-Length: \(body.count)\r\n"
+            response += "Connection: close\r\n\r\n"
+            var data = Data(response.utf8)
+            data.append(body)
+            connection.send(content: data, completion: .contentProcessed { [weak self, weak connection] error in
+                guard let self, let connection else { return }
+                if let error {
+                    AppLogger.error("Camera API response failed: \(error.localizedDescription)", category: "RTSP")
+                }
+                self.closeClient(connection)
+            })
+        } catch {
+            AppLogger.error("Could not encode camera API response: \(error.localizedDescription)", category: "RTSP")
+            closeClient(connection)
         }
     }
 
@@ -745,6 +938,10 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         case "SETUP":
             setupTransport(headers["transport"], cseq: cseq, connection: connection)
         case "PLAY":
+            guard isStreamingEnabled else {
+                sendResponse(to: connection, status: "503 Service Unavailable", cseq: cseq)
+                return
+            }
             guard transport != nil else {
                 sendResponse(to: connection, status: "455 Method Not Valid in This State", cseq: cseq)
                 return
@@ -949,12 +1146,15 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     }
 
     private func closeClient(_ connection: NWConnection) {
-        guard client === connection else { return }
-        client = nil
+        let identifier = ObjectIdentifier(connection)
+        connections.removeValue(forKey: identifier)
+        connectionBuffers.removeValue(forKey: identifier)
+        pendingHTTPResponses.remove(identifier)
         connection.stateUpdateHandler = nil
         connection.cancel()
+        guard client === connection else { return }
+        client = nil
         updateClientConnection(false)
-        clientBuffer.removeAll()
         isPlaying = false
         stopSenderReportTimer()
         transport = nil
