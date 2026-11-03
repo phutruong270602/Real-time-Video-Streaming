@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import CoreImage
 import CoreMedia
 import Darwin
 import Foundation
@@ -15,6 +16,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private let networkQueue = DispatchQueue(label: "iphone.rtsp.server.network")
     private let encoderQueue = DispatchQueue(label: "iphone.rtsp.server.encoder")
     private let settingsLock = NSLock()
+    private let imageContext = CIContext(options: [.useSoftwareRenderer: false])
     private let udpRTPPort: UInt16 = 5004
     private var listener: NWListener?
     private var client: NWConnection?
@@ -36,7 +38,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private var encodedFrameCount: UInt64 = 0
     private var nalLengthFieldBytes = 4
     private var isPlaying = false
-    private var configuredServerAddress = Self.localIPv4Address() ?? "0.0.0.0"
+    private var configuredServerAddress = RTSPServer.localIPv4Address() ?? "0.0.0.0"
 
     var streamURL: String {
         "rtsp://\(currentServerAddress()):\(port)/"
@@ -119,7 +121,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         }
     }
 
-    func updateVideoSettings(frameRate: Int, bitrate: Int) {
+    func updateVideoSettings(frameRate: Int, bitrate: Int, resolution: VideoResolution) {
         settingsLock.lock()
         configuredFrameRate = max(1, frameRate)
         configuredBitrate = max(250_000, bitrate)
@@ -130,7 +132,13 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         )
 
         encoderQueue.async { [weak self] in
-            guard let self, let compressionSession = self.compressionSession else { return }
+            guard let self, self.compressionSession != nil else { return }
+            let width = Int(resolution.width)
+            let height = Int(resolution.height)
+            if self.videoWidth != width || self.videoHeight != height {
+                self.configureEncoder(width: width, height: height)
+            }
+            guard let compressionSession = self.compressionSession else { return }
             let settings = self.currentSettings()
             VTSessionSetProperty(
                 compressionSession,
@@ -534,20 +542,74 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         encoderQueue.async { [weak self] in
             guard let self,
                   let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-            let width = CVPixelBufferGetWidth(pixelBuffer)
-            let height = CVPixelBufferGetHeight(pixelBuffer)
-            if width != self.videoWidth || height != self.videoHeight || self.compressionSession == nil {
-                self.configureEncoder(width: width, height: height)
+            if self.compressionSession == nil {
+                AppLogger.error("H.264 encoder is unavailable; dropping frame", category: "RTSP")
+                return
             }
-            guard let compressionSession = self.compressionSession else { return }
+            guard let compressionSession = self.compressionSession,
+                  let inputBuffer = self.outputPixelBuffer(
+                      for: pixelBuffer,
+                      session: compressionSession
+                  ) else { return }
             let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             self.encodeNextFrame(
-                pixelBuffer,
+                inputBuffer,
                 presentationTime: presentationTime,
                 duration: CMSampleBufferGetDuration(sampleBuffer),
                 session: compressionSession
             )
         }
+    }
+
+    private func outputPixelBuffer(
+        for inputBuffer: CVPixelBuffer,
+        session: VTCompressionSession
+    ) -> CVPixelBuffer? {
+        let inputWidth = CVPixelBufferGetWidth(inputBuffer)
+        let inputHeight = CVPixelBufferGetHeight(inputBuffer)
+        guard inputWidth != videoWidth || inputHeight != videoHeight else {
+            return inputBuffer
+        }
+
+        guard let pool = VTCompressionSessionGetPixelBufferPool(session) else {
+            AppLogger.error("H.264 encoder did not provide an output pixel-buffer pool", category: "RTSP")
+            return nil
+        }
+
+        var outputBuffer: CVPixelBuffer?
+        let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outputBuffer)
+        guard status == kCVReturnSuccess, let outputBuffer else {
+            AppLogger.error("Could not allocate output pixel buffer: \(status)", category: "RTSP")
+            return nil
+        }
+
+        let image = CIImage(cvPixelBuffer: inputBuffer)
+        let targetAspectRatio = CGFloat(videoWidth) / CGFloat(videoHeight)
+        var cropRect = image.extent
+        if cropRect.width / cropRect.height > targetAspectRatio {
+            cropRect.size.width = cropRect.height * targetAspectRatio
+            cropRect.origin.x = image.extent.midX - cropRect.width / 2
+        } else {
+            cropRect.size.height = cropRect.width / targetAspectRatio
+            cropRect.origin.y = image.extent.midY - cropRect.height / 2
+        }
+
+        let scaleX = CGFloat(videoWidth) / cropRect.width
+        let scaleY = CGFloat(videoHeight) / cropRect.height
+        let outputImage = image
+            .cropped(to: cropRect)
+            .transformed(by: CGAffineTransform(
+                translationX: -cropRect.minX,
+                y: -cropRect.minY
+            ))
+            .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+        imageContext.render(
+            outputImage,
+            to: outputBuffer,
+            bounds: CGRect(x: 0, y: 0, width: videoWidth, height: videoHeight),
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+        return outputBuffer
     }
 
     private func configureEncoder(width: Int, height: Int) {
@@ -691,7 +753,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         let copyStatus: OSStatus = encodedData.withUnsafeMutableBytes {
             (destination: UnsafeMutableRawBufferPointer) -> OSStatus in
             guard let baseAddress = destination.baseAddress else {
-                return kCMBlockBufferBadPointerParameter
+                return kCMBlockBufferBadPointerParameterErr
             }
             return CMBlockBufferCopyDataBytes(
                 blockBuffer,
@@ -765,7 +827,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         guard let nalHeader = nal.first else { return [] }
 
         let fragmentPayloadSize = maximumPayload - 2
-        let nalPayload = nal.dropFirst()
+        let nalPayload = Data(nal.dropFirst())
         var packets: [Data] = []
         var offset = 0
         while offset < nalPayload.count {

@@ -13,7 +13,7 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     @Published private(set) var availableCameras: [CameraPosition] = []
     @Published private(set) var capabilities: [CameraFormatCapability] = []
     @Published private(set) var capabilitiesByCamera: [CameraPosition: [CameraFormatCapability]] = [:]
-    @Published private(set) var selectedResolution: VideoResolution = .fullHD
+    @Published private(set) var selectedResolution: VideoResolution = .hd1080Portrait
     @Published private(set) var selectedFPS = StreamingConfiguration.defaultFrameRate
     @Published private(set) var selectedCamera: CameraPosition = .back
 
@@ -156,7 +156,9 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
             let modes = capabilitiesByCamera[initialCamera] ?? []
 
             let initialResolution: VideoResolution
-            if modes.contains(where: { $0.resolution == .fullHD }) {
+            if modes.contains(where: { $0.resolution == .hd1080Portrait }) {
+                initialResolution = .hd1080Portrait
+            } else if modes.contains(where: { $0.resolution == .fullHD }) {
                 initialResolution = .fullHD
             } else if modes.contains(where: { $0.resolution == .hd720 }) {
                 initialResolution = .hd720
@@ -259,8 +261,9 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     ) throws {
         guard let format = device.formats.first(where: { format in
             let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-            return dimensions.width == resolution.width
-                && dimensions.height == resolution.height
+            let captureResolution = resolution.captureFormatResolution
+            return dimensions.width == captureResolution.width
+                && dimensions.height == captureResolution.height
                 && format.videoSupportedFrameRateRanges.contains {
                     Double(fps) >= $0.minFrameRate && Double(fps) <= $0.maxFrameRate
                 }
@@ -347,13 +350,24 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     private func formatCapabilities(for device: AVCaptureDevice) -> [CameraFormatCapability] {
         device.formats.flatMap { format -> [CameraFormatCapability] in
             let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-            guard let resolution = VideoResolution(dimensions: dimensions) else { return [] }
-            return format.videoSupportedFrameRateRanges.map {
-                CameraFormatCapability(
-                    resolution: resolution,
-                    minimumFPS: $0.minFrameRate,
-                    maximumFPS: $0.maxFrameRate
+            guard let captureResolution = VideoResolution(dimensions: dimensions) else { return [] }
+            return format.videoSupportedFrameRateRanges.flatMap { frameRateRange in
+                let capability = CameraFormatCapability(
+                    resolution: captureResolution,
+                    minimumFPS: frameRateRange.minFrameRate,
+                    maximumFPS: frameRateRange.maxFrameRate
                 )
+                if captureResolution == .fullHD {
+                    return [
+                        capability,
+                        CameraFormatCapability(
+                            resolution: .hd1080Portrait,
+                            minimumFPS: frameRateRange.minFrameRate,
+                            maximumFPS: frameRateRange.maxFrameRate
+                        )
+                    ]
+                }
+                return [capability]
             }
         }
     }

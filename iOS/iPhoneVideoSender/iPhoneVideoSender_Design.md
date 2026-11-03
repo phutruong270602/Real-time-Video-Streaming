@@ -180,7 +180,7 @@ Sử dụng AVFoundation để capture camera.
 
 Các thông số cần hỗ trợ:
 
-- Resolution: 1280 × 720 / 1920 × 1080.
+- Resolution đầu ra: 1280 × 720 / 960 × 1080 / 1920 × 1080; độ phân giải 960 × 1080 được crop/scale từ camera format 1920 × 1080.
 - FPS: 30 / 60 / 120 / 150 / 200 / 240 (chỉ hiển thị mức camera hỗ trợ).
 - Camera: Front / Back.
 - Camera format.

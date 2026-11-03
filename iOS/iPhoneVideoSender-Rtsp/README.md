@@ -19,6 +19,10 @@ The sender listens on RTSP TCP port `8554`. UDP RTP uses server port `5004`
 reports. If UDP setup fails because port `5004` is unavailable, select TCP in
 the Windows receiver.
 
+The default video output is `960 × 1080`, center-cropped from the camera's
+`1920 × 1080` capture format. Other available resolutions depend on the
+selected camera and frame rate.
+
 ## Logs
 
 Expand **Application logs** in the sender to see camera, RTSP control, encoder,

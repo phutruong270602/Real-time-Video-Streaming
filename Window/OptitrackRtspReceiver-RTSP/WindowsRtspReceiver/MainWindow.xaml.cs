@@ -85,13 +85,13 @@ public partial class MainWindow : Window
         DiscoverRtspServersButton.IsEnabled = false;
         _discoveredRtspServers.Clear();
         RtspServersComboBox.SelectedItem = null;
-        _viewModel.ControlStatus = "Searching the local network for RTSP servers...";
-        ReceiverLog.Write("RTSP_DISCOVERY", "scan_started service=_rtsp._tcp.local duration_seconds=4");
+        _viewModel.ControlStatus = "Searching the local network for iPhone RTSP servers...";
+        ReceiverLog.Write("RTSP_DISCOVERY", "scan_started service=_rtsp._tcp.local duration_seconds=7");
 
         try
         {
             var servers = await _rtspServerDiscovery.DiscoverAsync(
-                TimeSpan.FromSeconds(4),
+                TimeSpan.FromSeconds(7),
                 cancellation.Token);
             foreach (var server in servers)
             {
@@ -100,12 +100,12 @@ public partial class MainWindow : Window
 
             if (servers.Count == 0)
             {
-                _viewModel.ControlStatus = "No RTSP service found. The iPhone sender must run and advertise an RTSP server.";
+                _viewModel.ControlStatus = "No RTSP server found. Check that the iPhone sender is running on the same Wi-Fi and Windows allows multicast UDP 5353 on a Private or Domain network.";
                 ReceiverLog.Write("RTSP_DISCOVERY", "scan_completed servers_found=0");
             }
             else
             {
-                _viewModel.ControlStatus = $"Found {servers.Count} RTSP server(s). Select one, then verify its stream path.";
+                _viewModel.ControlStatus = $"Found {servers.Count} RTSP server(s). Select the iPhone to fill in its URL.";
                 ReceiverLog.Write("RTSP_DISCOVERY", $"scan_completed servers_found={servers.Count}");
             }
         }
@@ -141,8 +141,8 @@ public partial class MainWindow : Window
         }
 
         RtspUrlTextBox.Text = server.Url;
-        _viewModel.ControlStatus = $"Selected {server.DisplayName}. Add the stream path if required by the server.";
-        _viewModel.Diagnostic = "Discovery supplied the server address and port; the RTSP stream path may need to be entered manually.";
+        _viewModel.ControlStatus = $"Selected {server.DisplayName}. The RTSP URL has been filled in.";
+        _viewModel.Diagnostic = "The discovered iPhone RTSP URL is ready to connect.";
         ReceiverLog.Write("RTSP_DISCOVERY", $"server_selected name=\"{server.Name}\" address={server.Address} port={server.Port} url=\"{server.Url}\"");
     }
 

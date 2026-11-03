@@ -14,7 +14,8 @@ struct RTSPSenderView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     CameraPreview(session: camera.session)
-                        .aspectRatio(16 / 9, contentMode: .fit)
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(4 / 3, contentMode: .fit)
                         .background(.black)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
 
@@ -58,7 +59,11 @@ struct RTSPSenderView: View {
                     .padding(14)
                     .background(.background, in: RoundedRectangle(cornerRadius: 14))
                     .onChange(of: bitrate) { _, value in
-                        server.updateVideoSettings(frameRate: camera.selectedFPS, bitrate: value)
+                        server.updateVideoSettings(
+                            frameRate: camera.selectedFPS,
+                            bitrate: value,
+                            resolution: camera.selectedResolution
+                        )
                     }
 
                     HStack(spacing: 12) {
@@ -93,7 +98,18 @@ struct RTSPSenderView: View {
                 await startServer()
             }
             .onChange(of: camera.selectedFPS) { _, fps in
-                server.updateVideoSettings(frameRate: fps, bitrate: bitrate)
+                server.updateVideoSettings(
+                    frameRate: fps,
+                    bitrate: bitrate,
+                    resolution: camera.selectedResolution
+                )
+            }
+            .onChange(of: camera.selectedResolution) { _, resolution in
+                server.updateVideoSettings(
+                    frameRate: camera.selectedFPS,
+                    bitrate: bitrate,
+                    resolution: resolution
+                )
             }
             .onDisappear {
                 server.stop(camera: camera)

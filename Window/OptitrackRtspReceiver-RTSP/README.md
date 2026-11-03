@@ -50,10 +50,10 @@ The WPF application is locked to **RTSP URL** mode and no longer starts the
 iPhone WebSocket signaling server or WebRTC receiver. It contains the URL and
 UDP/TCP controls, connection timeout, automatic reconnect and delay, and
 encoded packet queue capacity. **Find RTSP servers (Bonjour)** searches the
-local network for `_rtsp._tcp.local` DNS-SD advertisements, then fills in the
-discovered server IP and port. The stream path may still need to be entered
-manually. This cannot discover an iPhone that only sends WebRTC or does not
-advertise an RTSP server. The monitor shows
+local network for `_rtsp._tcp.local` DNS-SD advertisements and resolves the
+service and its IP address through mDNS, then fills in the discovered RTSP URL.
+The iPhone sender must be running on the same Wi-Fi. Guest-network isolation or
+a firewall blocking multicast UDP port 5353 can prevent discovery. The monitor shows
 connection/codec/resolution, receive/decode/render FPS, bitrate, packet/byte
 counts, queue drops and drop rate, session duration, and diagnostics. WebRTC
 and iPhone source controls are not available in this RTSP-only client. Its build

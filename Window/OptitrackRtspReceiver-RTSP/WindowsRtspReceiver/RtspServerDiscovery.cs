@@ -1,6 +1,5 @@
 using Makaretu.Dns;
 using System.Net;
-using System.Net.Sockets;
 
 namespace WindowsRtspReceiver;
 
@@ -18,118 +17,115 @@ internal sealed class RtspServerDiscovery
         CancellationToken cancellationToken)
     {
         using var discovery = new ServiceDiscovery();
-        using var resolutionTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        resolutionTimeout.CancelAfter(scanDuration + TimeSpan.FromSeconds(2));
+        var multicast = discovery.Mdns;
         var servers = new Dictionary<string, RtspServer>(StringComparer.OrdinalIgnoreCase);
-        var pendingResolutions = new List<Task>();
+        var services = new Dictionary<string, (string Name, string Target, ushort Port)>(
+            StringComparer.OrdinalIgnoreCase);
+        var addresses = new Dictionary<string, HashSet<IPAddress>>(StringComparer.OrdinalIgnoreCase);
         var sync = new object();
-        var acceptingResults = true;
 
-        async Task ResolveServiceAsync(DomainName instanceName)
+        void ProcessAnswer(Message message)
         {
-            try
+            var records = message.Answers.Concat(message.AdditionalRecords).ToArray();
+            var srvRecords = records
+                .OfType<SRVRecord>()
+                .Where(record => record.Port > 0 && IsRtspServiceInstance(record.Name))
+                .ToArray();
+            var addressRecords = records.OfType<AddressRecord>().ToArray();
+            var targetsToResolve = new HashSet<DomainName>();
+
+            lock (sync)
             {
-                var srvResponse = await ResolveAsync(
-                    discovery.NameServer,
-                    instanceName,
-                    DnsType.SRV,
-                    resolutionTimeout.Token).ConfigureAwait(false);
-                var srvRecords = srvResponse.Answers
-                    .Concat(srvResponse.AdditionalRecords)
-                    .OfType<SRVRecord>()
-                    .Where(record => record.Port > 0)
-                    .ToArray();
+                foreach (var address in addressRecords)
+                {
+                    var target = address.Name.ToString().TrimEnd('.');
+                    if (!addresses.TryGetValue(target, out var knownAddresses))
+                    {
+                        knownAddresses = [];
+                        addresses.Add(target, knownAddresses);
+                    }
+
+                    knownAddresses.Add(address.Address);
+                }
 
                 foreach (var srv in srvRecords)
                 {
-                    var records = srvResponse.Answers
-                        .Concat(srvResponse.AdditionalRecords)
-                        .Where(record => record.Name == srv.Target)
-                        .OfType<AddressRecord>()
-                        .ToList();
-                    foreach (var addressType in new[] { DnsType.A, DnsType.AAAA })
-                    {
-                        if (records.Count > 0)
-                        {
-                            break;
-                        }
+                    var instance = srv.Name.ToString();
+                    var target = srv.Target.ToString().TrimEnd('.');
+                    var name = srv.Name.Labels.FirstOrDefault()
+                        ?? srv.Name.ToString().TrimEnd('.');
+                    services[instance] = (name, target, srv.Port);
 
-                        var addressResponse = await ResolveAsync(
-                            discovery.NameServer,
-                            srv.Target,
-                            addressType,
-                            resolutionTimeout.Token).ConfigureAwait(false);
-                        records.AddRange(addressResponse.Answers
-                            .Concat(addressResponse.AdditionalRecords)
-                            .OfType<AddressRecord>());
+                    if (!addresses.TryGetValue(target, out var knownAddresses) ||
+                        knownAddresses.Count == 0)
+                    {
+                        targetsToResolve.Add(srv.Target);
+                    }
+                }
+
+                foreach (var service in services.Values)
+                {
+                    if (!addresses.TryGetValue(service.Target, out var knownAddresses))
+                    {
+                        continue;
                     }
 
-                    foreach (var address in records.Select(record => record.Address).Distinct())
+                    foreach (var address in knownAddresses)
                     {
-                        var server = new RtspServer(
-                            instanceName.Labels.FirstOrDefault() ?? instanceName.ToString().TrimEnd('.'),
-                            address,
-                            srv.Port);
-                        var key = $"{address}:{srv.Port}";
-                        lock (sync)
-                        {
-                            if (acceptingResults)
-                            {
-                                servers[key] = server;
-                            }
-                        }
+                        var server = new RtspServer(service.Name, address, service.Port);
+                        servers[$"{address}:{service.Port}"] = server;
                     }
                 }
             }
-            catch (OperationCanceledException)
+
+            foreach (var target in targetsToResolve)
             {
-            }
-            catch (Exception exception) when (
-                exception is InvalidOperationException or SocketException or ArgumentException)
-            {
-                ReceiverLog.Write(
-                    "RTSP_DISCOVERY",
-                    $"service_resolution_failed service=\"{instanceName}\" error=\"{exception.Message}\"");
+                multicast.SendQuery(target, type: DnsType.A);
+                multicast.SendQuery(target, type: DnsType.AAAA);
             }
         }
 
-        EventHandler<ServiceInstanceDiscoveryEventArgs> onServiceDiscovered = (_, args) =>
+        void OnServiceInstanceDiscovered(object? sender, ServiceInstanceDiscoveryEventArgs args)
         {
-            lock (sync)
-            {
-                if (!acceptingResults)
-                {
-                    return;
-                }
+            ReceiverLog.Write(
+                "RTSP_DISCOVERY",
+                $"service_instance_found name=\"{args.ServiceInstanceName}\"");
+            ProcessAnswer(args.Message);
+            multicast.SendQuery(args.ServiceInstanceName, type: DnsType.SRV);
+        }
 
-                pendingResolutions.Add(Task.Run(
-                    () => ResolveServiceAsync(args.ServiceInstanceName),
-                    cancellationToken));
-            }
-        };
+        EventHandler<MessageEventArgs> onAnswerReceived = (_, args) => ProcessAnswer(args.Message);
+        EventHandler<ServiceInstanceDiscoveryEventArgs> onServiceInstanceDiscovered =
+            OnServiceInstanceDiscovered;
 
-        discovery.ServiceInstanceDiscovered += onServiceDiscovered;
+        multicast.AnswerReceived += onAnswerReceived;
+        discovery.ServiceInstanceDiscovered += onServiceInstanceDiscovered;
         try
         {
-            discovery.QueryServiceInstances(new DomainName("_rtsp._tcp.local"));
-            await Task.Delay(scanDuration, cancellationToken).ConfigureAwait(false);
+            var startedAt = DateTime.UtcNow;
+            do
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                discovery.QueryServiceInstances(new DomainName("_rtsp._tcp.local"));
+
+                var remaining = scanDuration - (DateTime.UtcNow - startedAt);
+                if (remaining <= TimeSpan.Zero)
+                {
+                    break;
+                }
+
+                await Task.Delay(
+                    remaining < TimeSpan.FromSeconds(1) ? remaining : TimeSpan.FromSeconds(1),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            while (DateTime.UtcNow - startedAt < scanDuration);
         }
         finally
         {
-            discovery.ServiceInstanceDiscovered -= onServiceDiscovered;
-            lock (sync)
-            {
-                acceptingResults = false;
-            }
+            multicast.AnswerReceived -= onAnswerReceived;
+            discovery.ServiceInstanceDiscovered -= onServiceInstanceDiscovered;
         }
 
-        Task[] resolutions;
-        lock (sync)
-        {
-            resolutions = pendingResolutions.ToArray();
-        }
-
-        await Task.WhenAll(resolutions).ConfigureAwait(false);
         lock (sync)
         {
             return servers.Values
@@ -139,19 +135,8 @@ internal sealed class RtspServerDiscovery
         }
     }
 
-    private static Task<Message> ResolveAsync(
-        Makaretu.Dns.Resolving.NameServer nameServer,
-        DomainName name,
-        DnsType recordType,
-        CancellationToken cancellationToken)
-    {
-        var question = new Question
-        {
-            Name = name,
-            Type = recordType
-        };
-        var request = new Message();
-        request.Questions.Add(question);
-        return nameServer.ResolveAsync(request, cancellationToken);
-    }
+    private static bool IsRtspServiceInstance(DomainName name) =>
+        name.ToString().TrimEnd('.').EndsWith(
+            "._rtsp._tcp.local",
+            StringComparison.OrdinalIgnoreCase);
 }

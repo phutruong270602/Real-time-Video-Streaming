@@ -167,7 +167,7 @@ struct ContentView: View {
         ZStack(alignment: .topTrailing) {
             CameraPreview(session: camera.session)
                 .frame(maxWidth: .infinity)
-                .aspectRatio(16 / 9, contentMode: .fit)
+                .aspectRatio(4 / 3, contentMode: .fit)
                 .background(.black)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
 

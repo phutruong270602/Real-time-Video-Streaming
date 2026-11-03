@@ -2,6 +2,7 @@ import AVFoundation
 
 enum VideoResolution: String, CaseIterable, Identifiable {
     case hd720 = "1280 × 720"
+    case hd1080Portrait = "960 × 1080"
     case fullHD = "1920 × 1080"
 
     var id: String { rawValue }
@@ -9,6 +10,7 @@ enum VideoResolution: String, CaseIterable, Identifiable {
     var width: Int32 {
         switch self {
         case .hd720: 1280
+        case .hd1080Portrait: 960
         case .fullHD: 1920
         }
     }
@@ -16,8 +18,12 @@ enum VideoResolution: String, CaseIterable, Identifiable {
     var height: Int32 {
         switch self {
         case .hd720: 720
-        case .fullHD: 1080
+        case .hd1080Portrait, .fullHD: 1080
         }
+    }
+
+    var captureFormatResolution: VideoResolution {
+        self == .hd1080Portrait ? .fullHD : self
     }
 
     init?(dimensions: CMVideoDimensions) {

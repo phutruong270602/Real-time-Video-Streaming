@@ -7,7 +7,7 @@ struct StreamingConfiguration {
     static let defaultFrameRate = 150
     static let supportedFrameRates = [30, 60, 120, 150, 200, 240]
 
-    var resolution: VideoResolution = .fullHD
+    var resolution: VideoResolution = .hd1080Portrait
     var frameRate = Self.defaultFrameRate
     var bitrate = defaultBitrate
     var camera: CameraPosition = .back
