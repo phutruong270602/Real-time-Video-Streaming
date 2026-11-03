@@ -13,6 +13,13 @@ struct RTSPSenderView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
+                    HStack {
+                        Text("Version \(appVersion)")
+                        Spacer()
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                     CameraPreview(session: camera.session)
                         .frame(maxWidth: .infinity)
                         .aspectRatio(4 / 3, contentMode: .fit)
@@ -152,6 +159,10 @@ struct RTSPSenderView: View {
                 Text("Allow camera access in Settings to publish an RTSP video stream.")
             }
         }
+    }
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.2"
     }
 
     private var cameraControls: some View {
