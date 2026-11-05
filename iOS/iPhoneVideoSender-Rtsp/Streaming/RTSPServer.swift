@@ -851,7 +851,8 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                 resolution: sourceCamera.selectedResolution
             )
         }
-
+7
+        
         sendHTTPResponse(to: connection, object: ["code": 0, "message": "success"])
     }
 
@@ -1446,11 +1447,21 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         let scaledTimestamp = CMTimeConvertScale(timestamp, timescale: 90_000, method: .default).value
         let rtpTimestamp = UInt32(truncatingIfNeeded: scaledTimestamp)
         lastRtpTimestamp = rtpTimestamp
+        var rtpPackets: [Data] = []
         for (index, nal) in nals.enumerated() {
             let isLastNal = index == nals.count - 1
-            for packet in packetize(nal, timestamp: rtpTimestamp, markerOnLast: isLastNal) {
+            rtpPackets.append(contentsOf: packetize(nal, timestamp: rtpTimestamp, markerOnLast: isLastNal))
+        }
+
+        switch transport {
+        case .tcp(let channel):
+            sendInterleavedRTPPackets(rtpPackets, channel: channel)
+        case .udp:
+            for packet in rtpPackets {
                 sendRTPPacket(packet)
             }
+        case .none:
+            break
         }
     }
 
@@ -1510,15 +1521,8 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
 
     private func sendRTPPacket(_ packet: Data) {
         switch transport {
-        case .tcp(let channel):
-            guard let client, packet.count <= Int(UInt16.max) else { return }
-            var framed = Data([0x24, channel, UInt8(packet.count >> 8), UInt8(packet.count)])
-            framed.append(packet)
-            client.send(content: framed, completion: .contentProcessed { [weak self] error in
-                if let error {
-                    self?.updateStatus("RTP TCP send failed: \(error.localizedDescription)")
-                }
-            })
+        case .tcp:
+            return
         case .udp:
             guard let udpSender else { return }
             udpSender.send(content: packet, completion: .contentProcessed { [weak self] error in
@@ -1529,6 +1533,38 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         case .none:
             return
         }
+        recordSentRTPPacket(packet)
+    }
+
+    private func sendInterleavedRTPPackets(_ packets: [Data], channel: UInt8) {
+        guard let client, !packets.isEmpty else { return }
+        var framed = Data()
+        for packet in packets {
+            guard packet.count <= Int(UInt16.max) else {
+                AppLogger.error("RTP TCP packet exceeds the interleaved frame limit", category: "RTSP")
+                return
+            }
+            framed.append(contentsOf: [
+                0x24,
+                channel,
+                UInt8(packet.count >> 8),
+                UInt8(truncatingIfNeeded: packet.count)
+            ])
+            framed.append(packet)
+        }
+
+        client.send(content: framed, completion: .contentProcessed { [weak self] error in
+            if let error {
+                self?.updateStatus("RTP TCP send failed: \(error.localizedDescription)")
+                AppLogger.error("RTP TCP send failed: \(error.localizedDescription)", category: "RTSP")
+            }
+        })
+        for packet in packets {
+            recordSentRTPPacket(packet)
+        }
+    }
+
+    private func recordSentRTPPacket(_ packet: Data) {
         rtpPacketCount += 1
         let payloadSize = UInt64(max(0, packet.count - 12))
         rtpOctetCount += payloadSize

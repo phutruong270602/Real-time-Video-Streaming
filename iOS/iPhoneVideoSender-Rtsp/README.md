@@ -33,7 +33,9 @@ The sender provides live capture/encode FPS and transmitted bitrate through a
 statistics request/reply endpoint on UDP port `8556`. RTCP sender reports are
 still used for the RTSP stream, but packet-loss, jitter, and RTT metrics are not
 included in statistics responses. If UDP setup fails because port `5004` is
-unavailable, select TCP in the Windows receiver.
+unavailable, select TCP in the Windows receiver. For TCP interleaving, RTP
+packets from each H.264 access unit are framed together in one socket write
+while retaining the individual RTP packet boundaries.
 
 The default video output is `960 × 1080`, center-cropped from the camera's
 `1920 × 1080` capture format. Other available resolutions depend on the
