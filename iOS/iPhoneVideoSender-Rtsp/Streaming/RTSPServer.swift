@@ -20,6 +20,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private let networkQueue = DispatchQueue(label: "iphone.rtsp.server.network")
     private let encoderQueue = DispatchQueue(label: "iphone.rtsp.server.encoder")
     private let settingsLock = NSLock()
+    private let pendingSampleBufferLock = NSLock()
     private let statisticsLock = NSLock()
     private let imageContext = CIContext(options: [.useSoftwareRenderer: false])
     private let udpRTPPort: UInt16 = 5004
@@ -45,6 +46,8 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private var configuredBitrate = 12_000_000
     private var compressionSession: VTCompressionSession?
     private var compressionSessionRefcon: UnsafeMutableRawPointer?
+    private var pendingSampleBuffer: CMSampleBuffer?
+    private var isEncodingWorkerScheduled = false
     private var rtpSequence = UInt16.random(in: .min ... .max)
     private let ssrc = UInt32.random(in: .min ... .max)
     private var rtpPacketCount: UInt64 = 0
@@ -1171,26 +1174,54 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         statisticsLock.lock()
         capturedFramesForStatistics += 1
         statisticsLock.unlock()
-        encoderQueue.async { [weak self] in
-            guard let self,
-                  let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-            if self.compressionSession == nil {
-                AppLogger.error("H.264 encoder is unavailable; dropping frame", category: "RTSP")
-                return
-            }
-            guard let compressionSession = self.compressionSession,
-                  let inputBuffer = self.outputPixelBuffer(
-                      for: pixelBuffer,
-                      session: compressionSession
-                  ) else { return }
-            let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            self.encodeNextFrame(
-                inputBuffer,
-                presentationTime: presentationTime,
-                duration: CMSampleBufferGetDuration(sampleBuffer),
-                session: compressionSession
-            )
+
+        pendingSampleBufferLock.lock()
+        // Keep only the newest waiting frame so a slow encoder cannot build latency.
+        pendingSampleBuffer = sampleBuffer
+        let shouldScheduleWorker = !isEncodingWorkerScheduled
+        if shouldScheduleWorker {
+            isEncodingWorkerScheduled = true
         }
+        pendingSampleBufferLock.unlock()
+
+        guard shouldScheduleWorker else { return }
+        encoderQueue.async { [weak self] in
+            self?.processPendingSampleBuffers()
+        }
+    }
+
+    private func processPendingSampleBuffers() {
+        while true {
+            pendingSampleBufferLock.lock()
+            let sampleBuffer = pendingSampleBuffer
+            pendingSampleBuffer = nil
+            if sampleBuffer == nil {
+                isEncodingWorkerScheduled = false
+            }
+            pendingSampleBufferLock.unlock()
+
+            guard let sampleBuffer else { return }
+            encodeSampleBuffer(sampleBuffer)
+        }
+    }
+
+    private func encodeSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        guard let compressionSession else {
+            AppLogger.error("H.264 encoder is unavailable; dropping frame", category: "RTSP")
+            return
+        }
+        guard let inputBuffer = outputPixelBuffer(
+            for: pixelBuffer,
+            session: compressionSession
+        ) else { return }
+
+        encodeNextFrame(
+            inputBuffer,
+            presentationTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer),
+            duration: CMSampleBufferGetDuration(sampleBuffer),
+            session: compressionSession
+        )
     }
 
     private func outputPixelBuffer(
