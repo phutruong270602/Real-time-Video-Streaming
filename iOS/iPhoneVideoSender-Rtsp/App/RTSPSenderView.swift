@@ -8,156 +8,197 @@ struct RTSPSenderView: View {
     @State private var logLines: [String] = []
     @State private var isLogsExpanded = false
     @State private var isStarting = false
+    @State private var selectedTab = 0
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    HStack {
-                        Text("Version \(appVersion)")
-                        Spacer()
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                    CameraPreview(session: camera.session)
-                        .frame(maxWidth: .infinity)
-                        .aspectRatio(4 / 3, contentMode: .fit)
-                        .background(.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label(camera.status, systemImage: camera.isRunning ? "camera.fill" : "camera")
-                            .font(.subheadline)
-                        Label(server.status, systemImage: "dot.radiowaves.left.and.right")
-                            .font(.subheadline)
-                        Label(
-                            server.isClientConnected ? "Client: Connected" : "Client: Disconnected",
-                            systemImage: server.isClientConnected ? "checkmark.circle.fill" : "circle"
-                        )
-                        .font(.subheadline)
-                        .foregroundStyle(server.isClientConnected ? .green : .secondary)
-                        if server.isRunning {
-                            Text(server.streamURL)
-                                .font(.system(.footnote, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("Use this URL in the Windows receiver or OptitrackCameraDLL. The server also provides the camera HTTP control endpoints on this port. Keep both devices on the same local network.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 14))
-
-                    cameraControls
-
-                    VStack(alignment: .leading, spacing: 8) {
+        TabView(selection: $selectedTab) {
+            NavigationStack {
+                ScrollView {
+                    VStack(spacing: 18) {
                         HStack {
-                            Text("Video bitrate")
+                            Text("Version \(appVersion)")
                             Spacer()
-                            Text("\(bitrate / 1_000_000) Mbps")
-                                .foregroundStyle(.secondary)
                         }
-                        Slider(
-                            value: Binding(
-                                get: { Double(bitrate) },
-                                set: { bitrate = Int($0) }
-                            ),
-                            in: 2_000_000 ... 20_000_000,
-                            step: 1_000_000
-                        )
-                    }
-                    .padding(14)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 14))
-                    .onChange(of: bitrate) { _, value in
-                        server.updateVideoSettings(
-                            frameRate: camera.selectedFPS,
-                            bitrate: value,
-                            resolution: camera.selectedResolution
-                        )
-                    }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                    HStack(spacing: 12) {
-                        Button {
-                            Task { await startServer() }
-                        } label: {
-                            Label(isStarting ? "Starting..." : "Start RTSP server", systemImage: "play.fill")
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(
+                                camera.status,
+                                systemImage: camera.isRunning ? "camera.fill" : "camera"
+                            )
+                            .font(.subheadline)
+                            Label(server.status, systemImage: "dot.radiowaves.left.and.right")
+                                .font(.subheadline)
+                            Label(
+                                server.isClientConnected
+                                    ? "Client: Connected" : "Client: Disconnected",
+                                systemImage: server.isClientConnected
+                                    ? "checkmark.circle.fill" : "circle"
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(server.isClientConnected ? .green : .secondary)
+                            if server.isRunning {
+                                Text(server.streamURL)
+                                    .font(.system(.footnote, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(14)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 14))
+
+                        cameraControls
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Video bitrate")
+                                Spacer()
+                                Text("\(bitrate / 1_000_000) Mbps")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Slider(
+                                value: Binding(
+                                    get: { Double(bitrate) },
+                                    set: { bitrate = Int($0) }
+                                ),
+                                in: 2_000_000...20_000_000,
+                                step: 1_000_000
+                            )
+                        }
+                        .padding(14)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 14))
+                        .onChange(of: bitrate) { _, value in
+                            server.updateVideoSettings(
+                                frameRate: camera.selectedFPS,
+                                bitrate: value,
+                                resolution: camera.selectedResolution
+                            )
+                        }
+
+                        HStack(spacing: 12) {
+                            Button {
+                                Task { await startServer() }
+                            } label: {
+                                Label(
+                                    isStarting ? "Starting..." : "Start",
+                                    systemImage: "play.fill"
+                                )
                                 .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(server.isRunning || isStarting)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(server.isRunning || isStarting)
 
-                        Button {
-                            server.stop(camera: camera)
-                        } label: {
-                            Label("Stop", systemImage: "stop.fill")
-                                .frame(maxWidth: .infinity)
+                            Button {
+                                server.stop(camera: camera)
+                            } label: {
+                                Label("Stop", systemImage: "stop.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!server.isRunning)
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(!server.isRunning)
+
+                        statistics
+                        logsPanel
                     }
-
-                    statistics
-                    logsPanel
+                    .padding()
                 }
-                .padding()
+                .background(Color(uiColor: .systemGroupedBackground))
+                .navigationTitle("RTSP Video Sender")
             }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("RTSP Video Sender")
-            .task {
-                AppLogger.info("RTSP sender screen appeared", category: "RTSP")
-                await startServer()
+            .tabItem {
+                Label("Config", systemImage: "slider.horizontal.3")
             }
-            .onChange(of: camera.selectedFPS) { _, fps in
-                server.updateVideoSettings(
-                    frameRate: fps,
-                    bitrate: bitrate,
-                    resolution: camera.selectedResolution
-                )
-            }
-            .onChange(of: camera.selectedResolution) { _, resolution in
-                server.updateVideoSettings(
-                    frameRate: camera.selectedFPS,
-                    bitrate: bitrate,
-                    resolution: resolution
-                )
-            }
-            .onDisappear {
-                server.stop(camera: camera)
-                camera.stop()
-            }
-            .task(id: isLogsExpanded) {
-                guard isLogsExpanded else { return }
-                while !Task.isCancelled {
-                    logLines = AppLogger.recentLines()
-                    do {
-                        try await Task.sleep(for: .seconds(1))
-                    } catch is CancellationError {
-                        return
-                    } catch {
-                        AppLogger.error("Could not refresh logs: \(error.localizedDescription)", category: "Logging")
-                        return
+            .tag(0)
+
+            GeometryReader { geometry in
+                ZStack(alignment: .topTrailing) {
+                    CameraPreview(session: camera.session)
+                        .clipped()
+
+                    CenteringGuide()
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+
+                    if server.isRunning {
+                        Label("LIVE", systemImage: "circle.fill")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.red, in: Capsule())
+                            .frame(maxWidth: .infinity, alignment: .top)
+                            .padding(16)
+                            .accessibilityLabel("Live streaming")
                     }
                 }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .background(.black)
             }
-            .alert("Camera access is off", isPresented: Binding(
+            .tabItem {
+                Label("Live Video", systemImage: "video.fill")
+            }
+            .tag(1)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .task {
+            AppLogger.info("RTSP sender screen appeared", category: "RTSP")
+            await startServer()
+        }
+        .onChange(of: camera.selectedFPS) { _, fps in
+            server.updateVideoSettings(
+                frameRate: fps,
+                bitrate: bitrate,
+                resolution: camera.selectedResolution
+            )
+        }
+        .onChange(of: camera.selectedResolution) { _, resolution in
+            server.updateVideoSettings(
+                frameRate: camera.selectedFPS,
+                bitrate: bitrate,
+                resolution: resolution
+            )
+        }
+        .onDisappear {
+            server.stop(camera: camera)
+            camera.stop()
+        }
+        .task(id: isLogsExpanded) {
+            guard isLogsExpanded else { return }
+            while !Task.isCancelled {
+                logLines = AppLogger.recentLines()
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                } catch is CancellationError {
+                    return
+                } catch {
+                    AppLogger.error(
+                        "Could not refresh logs: \(error.localizedDescription)",
+                        category: "Logging")
+                    return
+                }
+            }
+        }
+        .alert(
+            "Camera access is off",
+            isPresented: Binding(
                 get: { camera.permissionDenied },
                 set: { presented in
                     if !presented {
                         camera.dismissPermissionAlert()
                     }
                 }
-            )) {
-                Button("Open Settings") {
-                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                    UIApplication.shared.open(url)
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Allow camera access in Settings to publish an RTSP video stream.")
+            )
+        ) {
+            Button("Open Settings") {
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(url)
             }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Allow camera access in Settings to publish an RTSP video stream.")
         }
     }
 
@@ -261,5 +302,54 @@ struct RTSPSenderView: View {
             return
         }
         server.start(camera: camera)
+    }
+}
+
+private struct CenteringGuide: View {
+    var body: some View {
+        ZStack {
+            CornerBrackets()
+                .stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .shadow(color: .black.opacity(0.7), radius: 2)
+
+            Circle()
+                .stroke(.white, lineWidth: 2)
+                .frame(width: 24, height: 24)
+                .shadow(color: .black.opacity(0.7), radius: 2)
+
+            Circle()
+                .fill(.white)
+                .frame(width: 4, height: 4)
+                .shadow(color: .black.opacity(0.7), radius: 2)
+        }
+    }
+}
+
+private struct CornerBrackets: Shape {
+    func path(in rect: CGRect) -> Path {
+        let inset: CGFloat = 28
+        let length: CGFloat = 34
+        let minX = rect.minX + inset
+        let maxX = rect.maxX - inset
+        let minY = rect.minY + inset
+        let maxY = rect.maxY - inset
+
+        var path = Path()
+        path.move(to: CGPoint(x: minX + length, y: minY))
+        path.addLine(to: CGPoint(x: minX, y: minY))
+        path.addLine(to: CGPoint(x: minX, y: minY + length))
+
+        path.move(to: CGPoint(x: maxX - length, y: minY))
+        path.addLine(to: CGPoint(x: maxX, y: minY))
+        path.addLine(to: CGPoint(x: maxX, y: minY + length))
+
+        path.move(to: CGPoint(x: minX, y: maxY - length))
+        path.addLine(to: CGPoint(x: minX, y: maxY))
+        path.addLine(to: CGPoint(x: minX + length, y: maxY))
+
+        path.move(to: CGPoint(x: maxX - length, y: maxY))
+        path.addLine(to: CGPoint(x: maxX, y: maxY))
+        path.addLine(to: CGPoint(x: maxX, y: maxY - length))
+        return path
     }
 }

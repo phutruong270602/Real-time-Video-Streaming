@@ -1230,7 +1230,8 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     ) -> CVPixelBuffer? {
         let inputWidth = CVPixelBufferGetWidth(inputBuffer)
         let inputHeight = CVPixelBufferGetHeight(inputBuffer)
-        guard inputWidth != videoWidth || inputHeight != videoHeight else {
+        let shouldRotate = videoHeight > videoWidth
+        guard inputWidth != videoWidth || inputHeight != videoHeight || shouldRotate else {
             return inputBuffer
         }
 
@@ -1246,7 +1247,21 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             return nil
         }
 
-        let image = CIImage(cvPixelBuffer: inputBuffer)
+        let sourceImage = CIImage(cvPixelBuffer: inputBuffer)
+        let image: CIImage
+        if shouldRotate {
+            let rotatedImage = sourceImage.transformed(
+                by: CGAffineTransform(rotationAngle: 3 * .pi / 2)
+            )
+            image = rotatedImage.transformed(
+                by: CGAffineTransform(
+                    translationX: -rotatedImage.extent.minX,
+                    y: -rotatedImage.extent.minY
+                )
+            )
+        } else {
+            image = sourceImage
+        }
         let targetAspectRatio = CGFloat(videoWidth) / CGFloat(videoHeight)
         var cropRect = image.extent
         if cropRect.width / cropRect.height > targetAspectRatio {
