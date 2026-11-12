@@ -37,6 +37,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private var udpRtcpConnection: NWConnection?
     private var senderReportTimer: DispatchSourceTimer?
     private var transport: RTPTransport?
+    private var pendingDescribe: (connection: NWConnection, cseq: String?)?
     private var sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
     private var sps: Data?
     private var pps: Data?
@@ -44,10 +45,14 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private var videoHeight = 0
     private var configuredFrameRate = 30
     private var configuredBitrate = 12_000_000
+    private var configuredWidth = 0
+    private var configuredHeight = 0
     private var compressionSession: VTCompressionSession?
     private var compressionSessionRefcon: UnsafeMutableRawPointer?
-    private var pendingSampleBuffer: CMSampleBuffer?
+    private var pendingSampleBuffer: (sampleBuffer: CMSampleBuffer, generation: UInt64)?
     private var isEncodingWorkerScheduled = false
+    private var isEncodingEnabled = false
+    private var encodingGeneration: UInt64 = 0
     private var rtpSequence = UInt16.random(in: .min ... .max)
     private let ssrc = UInt32.random(in: .min ... .max)
     private var rtpPacketCount: UInt64 = 0
@@ -82,16 +87,10 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             self.settingsLock.lock()
             self.configuredServerAddress = Self.localIPv4Address() ?? "0.0.0.0"
             self.sourceCamera = camera
-            self.settingsLock.unlock()
-            self.settingsLock.lock()
             self.configuredFrameRate = camera.selectedFPS
+            self.configuredWidth = Int(camera.selectedResolution.width)
+            self.configuredHeight = Int(camera.selectedResolution.height)
             self.settingsLock.unlock()
-            self.encoderQueue.sync {
-                self.configureEncoder(
-                    width: Int(camera.selectedResolution.width),
-                    height: Int(camera.selectedResolution.height)
-                )
-            }
             camera.onFrame = { [weak self] sampleBuffer in
                 self?.encode(sampleBuffer)
             }
@@ -169,6 +168,8 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         settingsLock.lock()
         configuredFrameRate = max(1, frameRate)
         configuredBitrate = max(250_000, bitrate)
+        configuredWidth = Int(resolution.width)
+        configuredHeight = Int(resolution.height)
         settingsLock.unlock()
         AppLogger.info(
             "RTSP video settings changed: \(frameRate) FPS, \(bitrate) bps",
@@ -208,6 +209,12 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         return (configuredFrameRate, configuredBitrate)
     }
 
+    private func currentVideoDimensions() -> (width: Int, height: Int) {
+        settingsLock.lock()
+        defer { settingsLock.unlock() }
+        return (configuredWidth, configuredHeight)
+    }
+
     private func currentServerAddress() -> String {
         settingsLock.lock()
         defer { settingsLock.unlock() }
@@ -232,7 +239,10 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         client = nil
         connectionBuffers.removeAll()
         pendingHTTPResponses.removeAll()
+        pendingDescribe = nil
         updateClientConnection(false)
+        stopEncoding()
+        releaseEncoder()
         udpSender?.cancel()
         udpSender = nil
         udpRtcpConnection?.cancel()
@@ -244,24 +254,30 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         resetStatistics()
         sps = nil
         pps = nil
+        setRunning(false, status: "RTSP server stopped")
+    }
+
+    private func releaseEncoder() {
         encoderQueue.async { [weak self] in
-            guard let self else { return }
-            if let compressionSession = self.compressionSession {
-                VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
-                VTCompressionSessionInvalidate(compressionSession)
-                self.compressionSession = nil
-                if let refcon = self.compressionSessionRefcon {
-                    Unmanaged<RTSPServer>.fromOpaque(refcon).release()
-                    self.compressionSessionRefcon = nil
-                }
+            guard let self, let compressionSession = self.compressionSession else { return }
+            VTCompressionSessionCompleteFrames(
+                compressionSession,
+                untilPresentationTimeStamp: .invalid
+            )
+            VTCompressionSessionInvalidate(compressionSession)
+            self.compressionSession = nil
+            self.videoWidth = 0
+            self.videoHeight = 0
+            if let refcon = self.compressionSessionRefcon {
+                Unmanaged<RTSPServer>.fromOpaque(refcon).release()
+                self.compressionSessionRefcon = nil
             }
         }
-        setRunning(false, status: "RTSP server stopped")
     }
 
     @discardableResult
     private func startDiscoveryBroadcast() -> Bool {
-        guard discoverySocket < 0 else { return true }
+        guard discoverySocket < 0, client == nil else { return false }
 
         guard let broadcastConfiguration = Self.wifiIPv4BroadcastConfiguration() else {
             AppLogger.error(
@@ -333,7 +349,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             category: "RTSP"
         )
         let timer = DispatchSource.makeTimerSource(queue: networkQueue)
-        timer.schedule(deadline: .now(), repeating: .seconds(1))
+        timer.schedule(deadline: .now(), repeating: .seconds(3))
         timer.setEventHandler { [weak self] in
             self?.sendDiscoveryBroadcast()
         }
@@ -727,6 +743,8 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         udpRtcpConnection = nil
         transport = nil
         isPlaying = false
+        stopEncoding()
+        stopDiscoveryBroadcast()
         sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         client = connection
         updateClientConnection(true)
@@ -781,6 +799,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             } else {
                 isStreamingEnabled = false
                 isPlaying = false
+                stopEncoding()
                 stopSenderReportTimer()
                 sendHTTPResponse(to: connection, object: ["message": "camera did stop"])
             }
@@ -904,41 +923,12 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             )
         case "DESCRIBE":
             guard let sps, let pps else {
-                sendResponse(
-                    to: connection,
-                    status: "503 Service Unavailable",
-                    cseq: cseq,
-                    headers: ["Retry-After": "1"]
-                )
+                // Generate one keyframe to obtain the H.264 parameter sets required by SDP.
+                pendingDescribe = (connection, cseq)
+                startEncoding()
                 return
             }
-            let serverAddress = currentServerAddress()
-            let address = serverAddress.contains(":") ? "[\(serverAddress)]" : serverAddress
-            let baseURL = "rtsp://\(address):\(port)/"
-            let sdp = [
-                "v=0",
-                "o=- 0 0 IN IP4 \(serverAddress)",
-                "s=iPhone H.264",
-                "c=IN IP4 \(serverAddress)",
-                "t=0 0",
-                "a=control:*",
-                "m=video 0 RTP/AVP 96",
-                "a=rtpmap:96 H264/90000",
-                "a=fmtp:96 packetization-mode=1;sprop-parameter-sets=\(sps.base64EncodedString()),\(pps.base64EncodedString())",
-                "a=framerate:\(currentSettings().frameRate)",
-                "a=control:trackID=0",
-                ""
-            ].joined(separator: "\r\n")
-            sendResponse(
-                to: connection,
-                status: "200 OK",
-                cseq: cseq,
-                headers: [
-                    "Content-Type": "application/sdp",
-                    "Content-Base": baseURL
-                ],
-                body: Data(sdp.utf8)
-            )
+            sendDescribeResponse(to: connection, cseq: cseq, sps: sps, pps: pps)
         case "SETUP":
             setupTransport(headers["transport"], cseq: cseq, connection: connection)
         case "PLAY":
@@ -953,6 +943,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             resetStatistics()
             isPlaying = true
             startSenderReportTimer()
+            startEncoding()
             updateStatus("Streaming RTSP to client")
             sendResponse(
                 to: connection,
@@ -964,15 +955,16 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
                     "RTP-Info": "url=\(url);seq=\(rtpSequence);rtptime=0"
                 ]
             )
-            requestKeyFrame()
             AppLogger.info("RTSP PLAY accepted", category: "RTSP")
         case "PAUSE":
             isPlaying = false
+            stopEncoding()
             stopSenderReportTimer()
             updateStatus("RTSP client paused")
             sendResponse(to: connection, status: "200 OK", cseq: cseq, headers: ["Session": sessionID])
         case "TEARDOWN":
             isPlaying = false
+            stopEncoding()
             stopSenderReportTimer()
             transport = nil
             udpSender?.cancel()
@@ -986,6 +978,41 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         default:
             sendResponse(to: connection, status: "405 Method Not Allowed", cseq: cseq)
         }
+    }
+
+    private func sendDescribeResponse(
+        to connection: NWConnection,
+        cseq: String?,
+        sps: Data,
+        pps: Data
+    ) {
+        let serverAddress = currentServerAddress()
+        let address = serverAddress.contains(":") ? "[\(serverAddress)]" : serverAddress
+        let baseURL = "rtsp://\(address):\(port)/"
+        let sdp = [
+            "v=0",
+            "o=- 0 0 IN IP4 \(serverAddress)",
+            "s=iPhone H.264",
+            "c=IN IP4 \(serverAddress)",
+            "t=0 0",
+            "a=control:*",
+            "m=video 0 RTP/AVP 96",
+            "a=rtpmap:96 H264/90000",
+            "a=fmtp:96 packetization-mode=1;sprop-parameter-sets=\(sps.base64EncodedString()),\(pps.base64EncodedString())",
+            "a=framerate:\(currentSettings().frameRate)",
+            "a=control:trackID=0",
+            ""
+        ].joined(separator: "\r\n")
+        sendResponse(
+            to: connection,
+            status: "200 OK",
+            cseq: cseq,
+            headers: [
+                "Content-Type": "application/sdp",
+                "Content-Base": baseURL
+            ],
+            body: Data(sdp.utf8)
+        )
     }
 
     private func setupTransport(_ header: String?, cseq: String?, connection: NWConnection) {
@@ -1166,18 +1193,35 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         udpSender = nil
         udpRtcpConnection?.cancel()
         udpRtcpConnection = nil
+        stopEncoding()
+        releaseEncoder()
+        pendingDescribe = nil
         updateStatus("RTSP server ready; waiting for a client")
+        if listener != nil {
+            _ = startDiscoveryBroadcast()
+        }
         AppLogger.info("RTSP client disconnected", category: "RTSP")
     }
 
     private func encode(_ sampleBuffer: CMSampleBuffer) {
+        pendingSampleBufferLock.lock()
+        guard isEncodingEnabled else {
+            pendingSampleBufferLock.unlock()
+            return
+        }
+        let generation = encodingGeneration
+        pendingSampleBufferLock.unlock()
+
         statisticsLock.lock()
         capturedFramesForStatistics += 1
         statisticsLock.unlock()
 
         pendingSampleBufferLock.lock()
-        // Keep only the newest waiting frame so a slow encoder cannot build latency.
-        pendingSampleBuffer = sampleBuffer
+        guard isEncodingEnabled, encodingGeneration == generation else {
+            pendingSampleBufferLock.unlock()
+            return
+        }
+        pendingSampleBuffer = (sampleBuffer, generation)
         let shouldScheduleWorker = !isEncodingWorkerScheduled
         if shouldScheduleWorker {
             isEncodingWorkerScheduled = true
@@ -1193,19 +1237,20 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private func processPendingSampleBuffers() {
         while true {
             pendingSampleBufferLock.lock()
-            let sampleBuffer = pendingSampleBuffer
+            let pendingFrame = pendingSampleBuffer
             pendingSampleBuffer = nil
-            if sampleBuffer == nil {
+            if pendingFrame == nil {
                 isEncodingWorkerScheduled = false
             }
             pendingSampleBufferLock.unlock()
 
-            guard let sampleBuffer else { return }
-            encodeSampleBuffer(sampleBuffer)
+            guard let pendingFrame else { return }
+            encodeSampleBuffer(pendingFrame.sampleBuffer, generation: pendingFrame.generation)
         }
     }
 
-    private func encodeSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    private func encodeSampleBuffer(_ sampleBuffer: CMSampleBuffer, generation: UInt64) {
+        guard isCurrentEncodingGeneration(generation) else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         guard let compressionSession else {
             AppLogger.error("H.264 encoder is unavailable; dropping frame", category: "RTSP")
@@ -1218,6 +1263,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
 
         encodeNextFrame(
             inputBuffer,
+            generation: generation,
             presentationTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer),
             duration: CMSampleBufferGetDuration(sampleBuffer),
             session: compressionSession
@@ -1290,7 +1336,8 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         return outputBuffer
     }
 
-    private func configureEncoder(width: Int, height: Int) {
+    @discardableResult
+    private func configureEncoder(width: Int, height: Int) -> Bool {
         if let compressionSession {
             VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
             VTCompressionSessionInvalidate(compressionSession)
@@ -1324,7 +1371,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         guard status == noErr, let newSession else {
             Unmanaged<RTSPServer>.fromOpaque(refcon).release()
             AppLogger.error("Could not create H.264 encoder: \(status)", category: "RTSP")
-            return
+            return false
         }
         compressionSession = newSession
         compressionSessionRefcon = refcon
@@ -1348,25 +1395,98 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         let prepareStatus = VTCompressionSessionPrepareToEncodeFrames(newSession)
         if prepareStatus != noErr {
             AppLogger.error("Could not prepare H.264 encoder: \(prepareStatus)", category: "RTSP")
+            VTCompressionSessionInvalidate(newSession)
+            compressionSession = nil
+            if let refcon = compressionSessionRefcon {
+                Unmanaged<RTSPServer>.fromOpaque(refcon).release()
+                compressionSessionRefcon = nil
+            }
+            return false
         } else {
             AppLogger.info(
                 "H.264 encoder configured: \(width)x\(height) at \(settings.frameRate) FPS, \(settings.bitrate) bps",
                 category: "RTSP"
             )
         }
+        return true
     }
 
-    private func requestKeyFrame() {
+    private func startEncoding() {
+        pendingSampleBufferLock.lock()
+        encodingGeneration &+= 1
+        let generation = encodingGeneration
+        isEncodingEnabled = false
+        pendingSampleBuffer = nil
+        pendingSampleBufferLock.unlock()
+
+        let dimensions = currentVideoDimensions()
         encoderQueue.async { [weak self] in
-            guard let self, self.compressionSession != nil else { return }
+            guard let self,
+                  self.isEncodingGenerationCurrent(generation) else { return }
+            var isConfigured = self.compressionSession != nil
+            if self.compressionSession == nil
+                || self.videoWidth != dimensions.width
+                || self.videoHeight != dimensions.height {
+                isConfigured = self.configureEncoder(
+                    width: dimensions.width,
+                    height: dimensions.height
+                )
+            }
+            guard isConfigured, self.compressionSession != nil else {
+                AppLogger.error("Could not start RTSP encoding because the H.264 encoder is unavailable", category: "RTSP")
+                self.networkQueue.async {
+                    guard self.isEncodingGenerationCurrent(generation) else { return }
+                    if let pendingDescribe = self.pendingDescribe {
+                        self.pendingDescribe = nil
+                        self.sendResponse(
+                            to: pendingDescribe.connection,
+                            status: "503 Service Unavailable",
+                            cseq: pendingDescribe.cseq,
+                            headers: ["Retry-After": "1"]
+                        )
+                    }
+                    if self.isPlaying {
+                        self.isPlaying = false
+                        self.stopSenderReportTimer()
+                        self.updateStatus("Could not start H.264 encoding")
+                    }
+                }
+                return
+            }
             self.forceKeyFrameOnNextInput = true
+            self.pendingSampleBufferLock.lock()
+            if self.encodingGeneration == generation {
+                self.isEncodingEnabled = true
+            }
+            self.pendingSampleBufferLock.unlock()
         }
+    }
+
+    private func stopEncoding() {
+        pendingSampleBufferLock.lock()
+        encodingGeneration &+= 1
+        isEncodingEnabled = false
+        pendingSampleBuffer = nil
+        pendingSampleBufferLock.unlock()
+    }
+
+    private func isCurrentEncodingGeneration(_ generation: UInt64) -> Bool {
+        pendingSampleBufferLock.lock()
+        defer { pendingSampleBufferLock.unlock() }
+        return isEncodingEnabled && encodingGeneration == generation
+    }
+
+    private func isEncodingGenerationCurrent(_ generation: UInt64) -> Bool {
+        pendingSampleBufferLock.lock()
+        defer { pendingSampleBufferLock.unlock() }
+        return encodingGeneration == generation
     }
 
     private var forceKeyFrameOnNextInput = false
 
     private func encodeNextFrame(
         _ pixelBuffer: CVPixelBuffer,
+        generation: UInt64,
         presentationTime: CMTime,
         duration: CMTime,
         session: VTCompressionSession
@@ -1376,24 +1496,28 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             ? [kVTEncodeFrameOptionKey_ForceKeyFrame as String: true] as CFDictionary
             : nil
         forceKeyFrameOnNextInput = false
+        let frameContext = Unmanaged.passRetained(RTSPEncodedFrameContext(generation: generation)).toOpaque()
         let status = VTCompressionSessionEncodeFrame(
             session,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: presentationTime,
             duration: duration,
             frameProperties: properties,
-            sourceFrameRefcon: nil,
+            sourceFrameRefcon: frameContext,
             infoFlagsOut: &flags
         )
         if status != noErr {
+            Unmanaged<RTSPEncodedFrameContext>.fromOpaque(frameContext).release()
             AppLogger.error("H.264 encoding failed: \(status)", category: "RTSP")
         }
     }
 
     fileprivate func handleEncodedFrame(
+        generation: UInt64,
         status: OSStatus,
         sampleBuffer: CMSampleBuffer?
     ) {
+        guard isCurrentEncodingGeneration(generation) else { return }
         guard status == noErr else {
             AppLogger.error("VideoToolbox returned an encoding error: \(status)", category: "RTSP")
             return
@@ -1448,10 +1572,23 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         let isKeyFrame = Self.isKeyFrame(sampleBuffer)
 
         networkQueue.async { [weak self] in
-            guard let self else { return }
+            guard let self,
+                  self.isCurrentEncodingGeneration(generation) else { return }
             if parameterSets.count >= 2 {
                 self.sps = parameterSets[0]
                 self.pps = parameterSets[1]
+                if let pendingDescribe = self.pendingDescribe {
+                    self.pendingDescribe = nil
+                    self.sendDescribeResponse(
+                        to: pendingDescribe.connection,
+                        cseq: pendingDescribe.cseq,
+                        sps: parameterSets[0],
+                        pps: parameterSets[1]
+                    )
+                    if !self.isPlaying {
+                        self.stopEncoding()
+                    }
+                }
             }
             if (1 ... 4).contains(lengthFieldBytes) {
                 self.nalLengthFieldBytes = lengthFieldBytes
@@ -1726,6 +1863,14 @@ private enum RTPTransport {
     case udp
 }
 
+private final class RTSPEncodedFrameContext {
+    let generation: UInt64
+
+    init(generation: UInt64) {
+        self.generation = generation
+    }
+}
+
 private struct RTSPStatisticsMessage: Encodable {
     let type: String
     let captureFps: Double
@@ -1740,8 +1885,16 @@ private func rtspCompressionOutputCallback(
     _ infoFlags: VTEncodeInfoFlags,
     _ sampleBuffer: CMSampleBuffer?
 ) {
+    guard let sourceFrameRefCon else { return }
+    let frameContext = Unmanaged<RTSPEncodedFrameContext>
+        .fromOpaque(sourceFrameRefCon)
+        .takeRetainedValue()
     guard let outputCallbackRefCon else { return }
     Unmanaged<RTSPServer>.fromOpaque(outputCallbackRefCon)
         .takeUnretainedValue()
-        .handleEncodedFrame(status: status, sampleBuffer: sampleBuffer)
+        .handleEncodedFrame(
+            generation: frameContext.generation,
+            status: status,
+            sampleBuffer: sampleBuffer
+        )
 }

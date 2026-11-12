@@ -17,10 +17,16 @@ This Xcode project publishes the iPhone camera as an H.264 RTSP stream for
 
 RTSP control and stream setup use TCP port `554`. Discovery sends the fixed
 announcement `IPHONE_RTSP|1|554` to the Wi-Fi interface's subnet broadcast
-address on UDP port `8555`; Windows uses the packet's source IP to build the
-RTSP URL. Both devices must be on the same LAN, and Windows must allow inbound
-UDP `8555` on its Private/Domain profile. Guest Wi-Fi, VPN routing, or wireless
-client isolation can still prevent broadcast discovery.
+address on UDP port `8555` every three seconds until an RTSP client connects;
+Windows uses the packet's source IP to build the RTSP URL. Discovery resumes
+when the client disconnects. Both devices must be on the same LAN, and Windows
+must allow inbound UDP `8555` on its Private/Domain profile. Guest Wi-Fi, VPN
+routing, or wireless client isolation can still prevent broadcast discovery.
+
+The camera capture remains active for the live preview, but H.264 encoding is
+idle while waiting for a client. The first RTSP `DESCRIBE` briefly encodes a
+keyframe to provide the H.264 parameter sets required by SDP; continuous
+encoding starts at `PLAY` and stops on `PAUSE`, `TEARDOWN`, or disconnect.
 
 The RTSP listener also accepts the HTTP camera-control requests used by
 `OptitrackCameraDLL` on that same TCP port. It implements `/ping`,
