@@ -16,6 +16,10 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     @Published private(set) var selectedResolution: VideoResolution = .hd1080Portrait
     @Published private(set) var selectedFPS = StreamingConfiguration.defaultFrameRate
     @Published private(set) var selectedCamera: CameraPosition = .back
+    @Published private(set) var selectedExposureFactor = 4
+    @Published private(set) var exposureTimeDescription = "Auto"
+
+    let availableExposureFactors = [2, 3, 4, 5, 6, 7, 8]
 
     var onFrame: ((CMSampleBuffer) -> Void)?
     var onConfigurationApplied: (() -> Void)?
@@ -86,15 +90,44 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     }
 
     func setResolution(_ resolution: VideoResolution) {
-        apply(resolution: resolution, fps: selectedFPS, camera: selectedCamera)
+        apply(
+            resolution: resolution,
+            fps: selectedFPS,
+            camera: selectedCamera,
+            exposureFactor: selectedExposureFactor
+        )
     }
 
     func setFrameRate(_ fps: Int) {
-        apply(resolution: selectedResolution, fps: fps, camera: selectedCamera)
+        apply(
+            resolution: selectedResolution,
+            fps: fps,
+            camera: selectedCamera,
+            exposureFactor: selectedExposureFactor
+        )
     }
 
     func setCamera(_ camera: CameraPosition) {
-        apply(resolution: selectedResolution, fps: selectedFPS, camera: camera)
+        apply(
+            resolution: selectedResolution,
+            fps: selectedFPS,
+            camera: camera,
+            exposureFactor: selectedExposureFactor
+        )
+    }
+
+    func setExposureFactor(_ factor: Int) {
+        guard availableExposureFactors.contains(factor) else {
+            AppLogger.error("Unsupported exposure factor: x\(factor)", category: "Camera")
+            return
+        }
+        selectedExposureFactor = factor
+        apply(
+            resolution: selectedResolution,
+            fps: selectedFPS,
+            camera: selectedCamera,
+            exposureFactor: factor
+        )
     }
 
     var availableResolutions: [VideoResolution] {
@@ -171,10 +204,11 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
                 ? StreamingConfiguration.defaultFrameRate
                 : (rates.first ?? 30)
 
-            try configureSession(
+            let exposureDuration = try configureSession(
                 device: device,
                 resolution: initialResolution,
-                fps: initialFPS
+                fps: initialFPS,
+                exposureFactor: selectedExposureFactor
             )
             session.startRunning()
             AppLogger.info(
@@ -189,6 +223,7 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
                 self.selectedCamera = initialCamera
                 self.selectedResolution = initialResolution
                 self.selectedFPS = initialFPS
+                self.exposureTimeDescription = Self.exposureDescription(for: exposureDuration)
                 self.isRunning = true
                 self.status = "Camera running"
                 self.onConfigurationApplied?()
@@ -208,7 +243,8 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     private func apply(
         resolution: VideoResolution,
         fps: Int,
-        camera: CameraPosition
+        camera: CameraPosition,
+        exposureFactor: Int
     ) {
         sessionQueue.async { [weak self] in
             guard let self else { return }
@@ -226,7 +262,12 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
                     )
                 }
 
-                try self.configureSession(device: device, resolution: resolution, fps: fps)
+                let exposureDuration = try self.configureSession(
+                    device: device,
+                    resolution: resolution,
+                    fps: fps,
+                    exposureFactor: exposureFactor
+                )
                 AppLogger.info(
                     "Camera configuration applied: \(camera.rawValue), \(resolution.rawValue), \(fps) FPS",
                     category: "Camera"
@@ -238,6 +279,8 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
                     self.selectedCamera = camera
                     self.selectedResolution = resolution
                     self.selectedFPS = fps
+                    self.selectedExposureFactor = exposureFactor
+                    self.exposureTimeDescription = Self.exposureDescription(for: exposureDuration)
                     self.status = "Camera running"
                     self.onConfigurationApplied?()
                 }
@@ -257,8 +300,9 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     private func configureSession(
         device: AVCaptureDevice,
         resolution: VideoResolution,
-        fps: Int
-    ) throws {
+        fps: Int,
+        exposureFactor: Int
+    ) throws -> Double? {
         guard let format = device.formats.first(where: { format in
             let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             let captureResolution = resolution.captureFormatResolution
@@ -304,12 +348,41 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
             session.addOutput(videoOutput)
         }
 
+        var exposureDuration: Double?
         do {
             try device.lockForConfiguration()
             device.activeFormat = format
             let frameDuration = CMTime(value: 1, timescale: CMTimeScale(fps))
             device.activeVideoMinFrameDuration = frameDuration
             device.activeVideoMaxFrameDuration = frameDuration
+
+            if device.isExposureModeSupported(.custom) {
+                let requestedDuration = CMTime(
+                    value: 1,
+                    timescale: CMTimeScale(fps * exposureFactor)
+                )
+                let maximumDuration = CMTimeCompare(format.maxExposureDuration, frameDuration) < 0
+                    ? format.maxExposureDuration
+                    : frameDuration
+                let boundedDuration = CMTimeCompare(requestedDuration, maximumDuration) > 0
+                    ? maximumDuration
+                    : requestedDuration
+                let effectiveDuration = CMTimeCompare(boundedDuration, format.minExposureDuration) < 0
+                    ? format.minExposureDuration
+                    : boundedDuration
+
+                device.setExposureModeCustom(
+                    duration: effectiveDuration,
+                    iso: device.iso,
+                    completionHandler: nil
+                )
+                exposureDuration = effectiveDuration.seconds
+            } else {
+                AppLogger.error(
+                    "Custom exposure is not supported; automatic exposure remains enabled",
+                    category: "Camera"
+                )
+            }
             device.unlockForConfiguration()
         } catch {
             session.removeInput(newInput)
@@ -322,6 +395,12 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
 
         currentInput = newInput
         session.commitConfiguration()
+        return exposureDuration
+    }
+
+    private static func exposureDescription(for duration: Double?) -> String {
+        guard let duration, duration > 0 else { return "Auto" }
+        return String(format: "1/%.0f s", 1 / duration)
     }
 
     private func cameraDevice(for position: CameraPosition) throws -> AVCaptureDevice {

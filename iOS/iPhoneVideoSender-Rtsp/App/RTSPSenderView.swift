@@ -241,6 +241,29 @@ struct RTSPSenderView: View {
                 }
             }
             .disabled(!camera.isRunning || camera.availableFrameRates.isEmpty)
+
+            Divider()
+
+            Picker("Exposure factor", selection: Binding(
+                get: { camera.selectedExposureFactor },
+                set: { camera.setExposureFactor($0) }
+            )) {
+                ForEach(camera.availableExposureFactors, id: \.self) { factor in
+                    Text("x\(factor)").tag(factor)
+                }
+            }
+            .disabled(!camera.isRunning)
+
+            Divider()
+
+            HStack {
+                Label("Exposure time", systemImage: "timer")
+                Spacer()
+                Text(camera.exposureTimeDescription)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.subheadline)
+            .frame(maxWidth: .infinity, minHeight: 44)
         }
         .pickerStyle(.menu)
         .padding(.horizontal, 14)
