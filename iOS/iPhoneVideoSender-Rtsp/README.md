@@ -43,6 +43,14 @@ unavailable, select TCP in the Windows receiver. For TCP interleaving, RTP
 packets from each H.264 access unit are framed together in one socket write
 while retaining the individual RTP packet boundaries.
 
+Every transmitted H.264 access unit includes an unregistered user-data SEI NAL
+(`nal_unit_type` 6) before its first video NAL. Its UUID is
+`D9E7A8C2-5B14-4F6A-913D-72068B34AF51`, followed by the 1-based frame number as
+an unsigned 64-bit big-endian integer. The number starts at 1 for each RTSP
+client connection and increases in send order; clients can read it after
+reassembling the access unit's RTP packets. This SEI does not change the
+displayed image.
+
 The default video output is `960 × 1080`, center-cropped from the camera's
 `1920 × 1080` capture format. Other available resolutions depend on the
 selected camera and frame rate.

@@ -16,6 +16,10 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private let discoveryPort: UInt16 = 8555
     private let statisticsPort: UInt16 = 8556
     private static let statisticsRequest = Data("GET_STATS".utf8)
+    private static let frameNumberSEIUUID: [UInt8] = [
+        0xD9, 0xE7, 0xA8, 0xC2, 0x5B, 0x14, 0x4F, 0x6A,
+        0x91, 0x3D, 0x72, 0x06, 0x8B, 0x34, 0xAF, 0x51
+    ]
 
     private let networkQueue = DispatchQueue(label: "iphone.rtsp.server.network")
     private let encoderQueue = DispatchQueue(label: "iphone.rtsp.server.encoder")
@@ -59,6 +63,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
     private var rtpOctetCount: UInt64 = 0
     private var lastRtpTimestamp: UInt32 = 0
     private var encodedFrameCount: UInt64 = 0
+    private var transmittedFrameCount: UInt64 = 0
     private var capturedFramesForStatistics: UInt64 = 0
     private var encodedFramesForStatistics: UInt64 = 0
     private var sentBytesForStatistics: UInt64 = 0
@@ -743,6 +748,7 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         udpRtcpConnection = nil
         transport = nil
         isPlaying = false
+        transmittedFrameCount = 0
         stopEncoding()
         stopDiscoveryBroadcast()
         sessionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
@@ -1627,6 +1633,14 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
             return
         }
 
+        transmittedFrameCount &+= 1
+        let frameNumberNAL = Self.frameNumberSEINAL(transmittedFrameCount)
+        let firstVideoNAL = nals.firstIndex { nal in
+            guard let header = nal.first else { return false }
+            return (1 ... 5).contains(header & 0x1f)
+        } ?? nals.count
+        nals.insert(frameNumberNAL, at: firstVideoNAL)
+
         let scaledTimestamp = CMTimeConvertScale(timestamp, timescale: 90_000, method: .default).value
         let rtpTimestamp = UInt32(truncatingIfNeeded: scaledTimestamp)
         lastRtpTimestamp = rtpTimestamp
@@ -1646,6 +1660,27 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         case .none:
             break
         }
+    }
+
+    private static func frameNumberSEINAL(_ frameNumber: UInt64) -> Data {
+        var rbsp = Data([0x05, 0x18])
+        rbsp.append(contentsOf: frameNumberSEIUUID)
+        for shift in stride(from: 56, through: 0, by: -8) {
+            rbsp.append(UInt8(truncatingIfNeeded: frameNumber >> shift))
+        }
+        rbsp.append(0x80)
+
+        var nal = Data([0x06])
+        var consecutiveZeroCount = 0
+        for byte in rbsp {
+            if consecutiveZeroCount >= 2, byte <= 0x03 {
+                nal.append(0x03)
+                consecutiveZeroCount = 0
+            }
+            nal.append(byte)
+            consecutiveZeroCount = byte == 0 ? consecutiveZeroCount + 1 : 0
+        }
+        return nal
     }
 
     private func packetize(_ nal: Data, timestamp: UInt32, markerOnLast: Bool) -> [Data] {
