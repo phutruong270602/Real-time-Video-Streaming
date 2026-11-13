@@ -71,9 +71,11 @@ seconds and the following one second. The client then opens an in-memory review
 with Play/Pause, a seek slider, previous/next frame, and New (return to live
 view) controls.
 The native receiver queues each decoded frame for review independently of the
-live display timer, and encodes review frames as JPEG with an FFmpeg MJPEG
-quantizer of 8. Review buffering is limited to 1 GiB; the native receiver logs
-any queue overflow.
+live display timer and encodes review frames on a dedicated worker using JPEG
+with an FFmpeg MJPEG quantizer of 2 for higher image quality. Review buffering
+is limited to 1 GiB for encoded frames and 512 MiB for pending frames; queue
+overflow is logged. During slider dragging, the frame is decoded only after
+the seek is released to avoid UI stalls.
 
 The application always appends startup, control, configuration, and sampled
 statistics to `log/receiver_ui.log`. Native RTSP sessions additionally append

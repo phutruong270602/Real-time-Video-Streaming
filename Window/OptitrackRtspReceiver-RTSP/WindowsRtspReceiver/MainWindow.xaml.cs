@@ -80,6 +80,7 @@ public partial class MainWindow : Window
     private bool _isReviewMode;
     private bool _isRtspRunning;
     private bool _updatingReviewTimeline;
+    private bool _isDraggingReviewTimeline;
 
     public MainWindow()
     {
@@ -889,11 +890,39 @@ public partial class MainWindow : Window
             (int)Math.Round(ReviewTimelineSlider.Value),
             0,
             _reviewFrames.Count - 1);
+        if (_isDraggingReviewTimeline)
+        {
+            ReviewFrameText.Text = $"Frame {_reviewFrameIndex + 1} / {_reviewFrames.Count}";
+        }
+        else
+        {
+            ShowReviewFrame();
+        }
+    }
+
+    private void ReviewTimelineSlider_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_isReviewMode)
+        {
+            _isDraggingReviewTimeline = true;
+            StopReviewPlayback();
+        }
+    }
+
+    private void ReviewTimelineSlider_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isDraggingReviewTimeline)
+        {
+            return;
+        }
+
+        _isDraggingReviewTimeline = false;
         ShowReviewFrame();
     }
 
     private void ReviewPlaybackTimer_Tick(object? sender, EventArgs e)
     {
+        var previousFrameIndex = _reviewFrameIndex;
         var targetTimestamp = _reviewPlaybackStartTimestamp + _reviewPlaybackClock.ElapsedMilliseconds;
         while (_reviewFrameIndex + 1 < _reviewFrames.Count &&
                _reviewFrames[_reviewFrameIndex + 1].TimestampMilliseconds <= targetTimestamp)
@@ -901,7 +930,10 @@ public partial class MainWindow : Window
             _reviewFrameIndex++;
         }
 
-        ShowReviewFrame();
+        if (_reviewFrameIndex != previousFrameIndex)
+        {
+            ShowReviewFrame();
+        }
         if (_reviewFrameIndex >= _reviewFrames.Count - 1)
         {
             StopReviewPlayback();
@@ -961,6 +993,7 @@ public partial class MainWindow : Window
         _reviewPlaybackClock.Stop();
         _reviewPlaybackStartTimestamp = 0;
         _isReviewMode = false;
+        _isDraggingReviewTimeline = false;
         _reviewFrameIndex = 0;
         _lastLoggedReviewFrameIndex = -1;
         lock (_impactFramesSync)

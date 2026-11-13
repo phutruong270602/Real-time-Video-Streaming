@@ -81,6 +81,8 @@
                                         IsMoveToPointEnabled="True"
                                         Margin="8,8,8,0" MinWidth="360"
                                         ToolTip="Drag to seek to a frame in the recorded video"
+                                        PreviewMouseLeftButtonDown="ReviewTimelineSlider_MouseLeftButtonDown"
+                                        PreviewMouseLeftButtonUp="ReviewTimelineSlider_MouseLeftButtonUp"
                                         ValueChanged="ReviewTimelineSlider_ValueChanged" />
                             </StackPanel>
                         </StackPanel>

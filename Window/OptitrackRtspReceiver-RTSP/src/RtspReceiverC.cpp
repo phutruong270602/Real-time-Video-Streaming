@@ -12,6 +12,7 @@ extern "C" {
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <ctime>
 #include <cstring>
@@ -47,13 +48,22 @@ extern "C" {
 namespace {
 
 constexpr std::size_t maximum_review_queue_bytes = 1024ULL * 1024 * 1024;
-constexpr int review_jpeg_quantizer = 8;
+constexpr std::size_t maximum_pending_review_bytes = 512ULL * 1024 * 1024;
+constexpr int review_jpeg_quantizer = 2;
 
 struct ReviewFrame {
     std::vector<std::uint8_t> jpeg;
     int width = 0;
     int height = 0;
     std::uint64_t sequence = 0;
+    std::int64_t timestamp_ms = 0;
+};
+
+struct PendingReviewFrame {
+    std::vector<std::uint8_t> bgra;
+    int width = 0;
+    int height = 0;
+    int stride = 0;
     std::int64_t timestamp_ms = 0;
 };
 
@@ -117,6 +127,7 @@ void log_decoded_frame(const std::string& event) noexcept
 {
     static std::mutex log_mutex;
     static bool failure_reported = false;
+    static std::uint64_t frame_log_count = 0;
     std::lock_guard<std::mutex> lock(log_mutex);
 
     try {
@@ -145,7 +156,10 @@ void log_decoded_frame(const std::string& event) noexcept
                << '.' << std::setfill('0') << std::setw(3) << milliseconds.count()
                << " [thread " << std::this_thread::get_id() << "] "
                << event << '\n';
-        output.flush();
+        ++frame_log_count;
+        if (frame_log_count == 1 || frame_log_count % 30 == 0) {
+            output.flush();
+        }
         if (!output) {
             throw std::runtime_error("Could not write decoded frame log file.");
         }
@@ -199,13 +213,20 @@ struct NativeReceiver {
     std::mutex lifecycle_mutex;
     std::mutex frame_mutex;
     std::mutex review_frame_mutex;
+    std::mutex pending_review_mutex;
+    std::condition_variable pending_review_condition;
     std::mutex error_mutex;
     std::thread decoder_thread;
+    std::thread review_encoder_thread;
     std::vector<std::uint8_t> latest_frame;
     std::deque<ReviewFrame> review_frames;
+    std::deque<PendingReviewFrame> pending_review_frames;
     std::size_t review_queue_bytes = 0;
+    std::size_t pending_review_bytes = 0;
     std::uint64_t review_frame_sequence = 0;
     std::uint64_t review_frames_dropped = 0;
+    std::uint64_t pending_review_frames_dropped = 0;
+    bool stop_review_encoder = true;
     const AVCodec* review_encoder = nullptr;
     AVCodecContext* review_encoder_context = nullptr;
     AVFrame* review_encoder_frame = nullptr;
@@ -257,11 +278,85 @@ struct NativeReceiver {
             decoder_thread.join();
         }
         {
+            std::lock_guard<std::mutex> lock(pending_review_mutex);
+            stop_review_encoder = true;
+            pending_review_frames.clear();
+            pending_review_bytes = 0;
+        }
+        pending_review_condition.notify_all();
+        if (review_encoder_thread.joinable()) {
+            review_encoder_thread.join();
+        }
+        {
             std::lock_guard<std::mutex> lock(review_frame_mutex);
             review_frames.clear();
             review_queue_bytes = 0;
         }
         reset_review_encoder();
+    }
+
+    void enqueue_review_frame(
+        const std::vector<std::uint8_t>& bgra,
+        int frame_width,
+        int frame_height,
+        int frame_stride,
+        std::int64_t timestamp)
+    {
+        PendingReviewFrame frame;
+        frame.bgra = bgra;
+        frame.width = frame_width;
+        frame.height = frame_height;
+        frame.stride = frame_stride;
+        frame.timestamp_ms = timestamp;
+
+        std::uint64_t dropped_frames = 0;
+        {
+            std::lock_guard<std::mutex> lock(pending_review_mutex);
+            if (stop_review_encoder) {
+                return;
+            }
+            pending_review_bytes += frame.bgra.size();
+            pending_review_frames.push_back(std::move(frame));
+            while (pending_review_bytes > maximum_pending_review_bytes &&
+                   !pending_review_frames.empty()) {
+                pending_review_bytes -= pending_review_frames.front().bgra.size();
+                pending_review_frames.pop_front();
+                ++pending_review_frames_dropped;
+                ++dropped_frames;
+            }
+        }
+        if (dropped_frames != 0) {
+            log_event("REVIEW_INPUT_QUEUE dropped_frames=" + std::to_string(dropped_frames) +
+                " total_dropped=" + std::to_string(pending_review_frames_dropped) +
+                " reason=512_MiB_queue_limit");
+        }
+        pending_review_condition.notify_one();
+    }
+
+    void review_encoder_loop()
+    {
+        while (true) {
+            PendingReviewFrame frame;
+            {
+                std::unique_lock<std::mutex> lock(pending_review_mutex);
+                pending_review_condition.wait(lock, [this] {
+                    return stop_review_encoder || !pending_review_frames.empty();
+                });
+                if (stop_review_encoder) {
+                    return;
+                }
+                frame = std::move(pending_review_frames.front());
+                pending_review_bytes -= frame.bgra.size();
+                pending_review_frames.pop_front();
+            }
+
+            encode_review_frame(
+                frame.bgra.data(),
+                frame.width,
+                frame.height,
+                frame.stride,
+                frame.timestamp_ms);
+        }
     }
 
     void reset_review_encoder()
@@ -427,10 +522,27 @@ struct NativeReceiver {
             review_frame_sequence = 0;
             review_frames_dropped = 0;
         }
+        {
+            std::lock_guard<std::mutex> pending_lock(pending_review_mutex);
+            pending_review_frames.clear();
+            pending_review_bytes = 0;
+            pending_review_frames_dropped = 0;
+            stop_review_encoder = false;
+        }
         set_error({});
 
         if (!receiver.start(start_options, error)) {
             set_error(error);
+            return false;
+        }
+
+        try {
+            review_encoder_thread = std::thread(&NativeReceiver::review_encoder_loop, this);
+        } catch (const std::exception& exception) {
+            receiver.stop();
+            error = std::string("Could not start impact review encoder thread: ") + exception.what();
+            set_error(error);
+            stop_locked();
             return false;
         }
 
@@ -442,6 +554,7 @@ struct NativeReceiver {
             receiver.stop();
             error = std::string("Could not start video decoder thread: ") + exception.what();
             set_error(error);
+            stop_locked();
             return false;
         }
         return true;
@@ -655,8 +768,8 @@ struct NativeReceiver {
                                 ')';
                         }
                         pixel_sample += ']';
-                        const bool review_frame_encoded = encode_review_frame(
-                            bgra.data(),
+                        enqueue_review_frame(
+                            bgra,
                             frame_width,
                             frame_height,
                             frame_stride,
@@ -696,9 +809,7 @@ struct NativeReceiver {
                                 " timestamp_ms=" + std::to_string(encoded.timestamp_ms) +
                                 " input_bytes=" + std::to_string(encoded.data.size()));
                         }
-                        if (review_frame_encoded) {
-                            set_error({});
-                        }
+                        set_error({});
                     } else {
                         set_error("FFmpeg could not convert a decoded video frame to BGRA.");
                     }
