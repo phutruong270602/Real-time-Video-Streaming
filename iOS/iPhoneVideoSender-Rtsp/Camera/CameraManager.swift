@@ -16,7 +16,7 @@ final class CameraManager: NSObject, ObservableObject, @unchecked Sendable {
     @Published private(set) var selectedResolution: VideoResolution = .hd1080Portrait
     @Published private(set) var selectedFPS = StreamingConfiguration.defaultFrameRate
     @Published private(set) var selectedCamera: CameraPosition = .back
-    @Published private(set) var selectedExposureFactor = 4
+    @Published private(set) var selectedExposureFactor = 8
     @Published private(set) var exposureTimeDescription = "Auto"
 
     let availableExposureFactors = [2, 3, 4, 5, 6, 7, 8]

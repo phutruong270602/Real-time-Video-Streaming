@@ -5,6 +5,7 @@
         Title="Optitrack iPhone RTSP Receiver" Height="820" Width="1440"
         MinHeight="680" MinWidth="1180" Background="#111827"
         Loaded="Window_Loaded"
+        PreviewKeyDown="Window_PreviewKeyDown"
         Closing="Window_Closing">
     <Grid Margin="16">
         <Grid.RowDefinitions>
@@ -38,6 +39,42 @@
                             <TextBlock x:Name="VideoPlaceholderMessage" Text="Connect the iPhone, then press Start"
                                        Foreground="#94A3B8" Margin="0,8,0,0"
                                        HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="ImpactControlsPanel"
+                            VerticalAlignment="Bottom" HorizontalAlignment="Center"
+                            Margin="0,0,0,12" Padding="10,8"
+                            Background="#E11F2937" CornerRadius="6">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <Button x:Name="ImpactButton" Content="Impact (I)"
+                                        MinWidth="100" Padding="10,6"
+                                        Click="ImpactButton_Click" />
+                                <TextBlock x:Name="ImpactStatusText"
+                                           Text="Waiting for 2 seconds of live video."
+                                           Foreground="White" VerticalAlignment="Center"
+                                           Margin="10,0,0,0" />
+                            </StackPanel>
+                            <StackPanel x:Name="ReviewControlsPanel" Orientation="Horizontal"
+                                        HorizontalAlignment="Center" Visibility="Collapsed"
+                                        Margin="0,8,0,0">
+                                <Button x:Name="NewReviewButton" Content="New"
+                                        MinWidth="56" Margin="0,0,6,0" Padding="8,4"
+                                        Click="NewReviewButton_Click" />
+                                <Button x:Name="PreviousFrameButton" Content="◀"
+                                        MinWidth="42" Margin="0,0,6,0" Padding="8,4"
+                                        ToolTip="Previous frame"
+                                        Click="PreviousFrameButton_Click" />
+                                <Button x:Name="PlayReviewButton" Content="Play"
+                                        MinWidth="56" Margin="0,0,6,0" Padding="8,4"
+                                        Click="PlayReviewButton_Click" />
+                                <Button x:Name="NextFrameButton" Content="▶"
+                                        MinWidth="42" Margin="0,0,8,0" Padding="8,4"
+                                        ToolTip="Next frame"
+                                        Click="NextFrameButton_Click" />
+                                <TextBlock x:Name="ReviewFrameText" Text="Frame 0 / 0"
+                                           Foreground="White" VerticalAlignment="Center" />
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </Grid>
