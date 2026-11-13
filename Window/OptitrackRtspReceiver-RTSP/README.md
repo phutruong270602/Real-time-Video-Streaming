@@ -76,6 +76,10 @@ with an FFmpeg MJPEG quantizer of 2 for higher image quality. Review buffering
 is limited to 1 GiB for encoded frames and 512 MiB for pending frames; queue
 overflow is logged. During slider dragging, the frame is decoded only after
 the seek is released to avoid UI stalls.
+Once the impact clip is ready, the client pauses H.264 decoding and review
+buffering while displaying it, but keeps the RTSP connection alive and drains
+incoming packets. Selecting **New** resumes live decoding at the next H.264
+keyframe and starts a fresh two-second pre-roll.
 
 The application always appends startup, control, configuration, and sampled
 statistics to `log/receiver_ui.log`. Native RTSP sessions additionally append

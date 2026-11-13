@@ -77,7 +77,7 @@ public partial class MainWindow : Window
     private bool _impactCapturePending;
     private bool _impactCaptureTruncated;
     private bool _impactCaptureIncomplete;
-    private bool _isReviewMode;
+    private volatile bool _isReviewMode;
     private bool _isRtspRunning;
     private bool _updatingReviewTimeline;
     private bool _isDraggingReviewTimeline;
@@ -675,6 +675,12 @@ public partial class MainWindow : Window
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            if (_isReviewMode)
+            {
+                await Task.Delay(100, cancellationToken);
+                continue;
+            }
+
             if (_receiver is not null &&
                 _receiver.TryDequeueReviewFrame(
                     out var jpegBytes,
@@ -799,6 +805,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_receiver is null || !_receiver.SetReviewMode(enabled: true))
+        {
+            _viewModel.LastError = "Could not pause live decoding while reviewing the impact.";
+            ReceiverLog.Write("ERROR", _viewModel.LastError);
+            UpdateImpactControls();
+            return;
+        }
+
+        _videoTimer.Stop();
         _isReviewMode = true;
         _reviewFrameIndex = 0;
         _lastLoggedReviewFrameIndex = -1;
@@ -816,9 +831,21 @@ public partial class MainWindow : Window
 
     private void NewReviewButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_receiver is null || !_receiver.SetReviewMode(enabled: false))
+        {
+            _viewModel.LastError = "Could not resume live decoding after impact review.";
+            ReceiverLog.Write("ERROR", _viewModel.LastError);
+            return;
+        }
+
         _reviewPlaybackTimer.Stop();
         _reviewPlaybackClock.Stop();
         _isReviewMode = false;
+        lock (_impactFramesSync)
+        {
+            _preImpactFrames.Clear();
+            _preImpactBufferBytes = 0;
+        }
         _reviewFrames.Clear();
         _impactBufferBytes = 0;
         _lastLoggedReviewFrameIndex = -1;
@@ -827,6 +854,8 @@ public partial class MainWindow : Window
         {
             VideoPlaceholder.Visibility = Visibility.Visible;
         }
+        _videoTimer.Start();
+        _viewModel.ConnectionStatus = "Resuming live; waiting for next H.264 keyframe";
         ImpactStatusText.Text = "Live view. Press Impact or I to save the previous 2 s and next 1 s.";
         UpdateImpactControls();
     }

@@ -227,6 +227,7 @@ struct NativeReceiver {
     std::uint64_t review_frames_dropped = 0;
     std::uint64_t pending_review_frames_dropped = 0;
     bool stop_review_encoder = true;
+    std::atomic<bool> review_mode{false};
     const AVCodec* review_encoder = nullptr;
     AVCodecContext* review_encoder_context = nullptr;
     AVFrame* review_encoder_frame = nullptr;
@@ -272,6 +273,7 @@ struct NativeReceiver {
 
     void stop_locked()
     {
+        review_mode = false;
         stop_decoder = true;
         receiver.stop();
         if (decoder_thread.joinable()) {
@@ -302,6 +304,10 @@ struct NativeReceiver {
         int frame_stride,
         std::int64_t timestamp)
     {
+        if (review_mode) {
+            return;
+        }
+
         PendingReviewFrame frame;
         frame.bgra = bgra;
         frame.width = frame_width;
@@ -312,7 +318,7 @@ struct NativeReceiver {
         std::uint64_t dropped_frames = 0;
         {
             std::lock_guard<std::mutex> lock(pending_review_mutex);
-            if (stop_review_encoder) {
+            if (stop_review_encoder || review_mode) {
                 return;
             }
             pending_review_bytes += frame.bgra.size();
@@ -333,6 +339,25 @@ struct NativeReceiver {
         pending_review_condition.notify_one();
     }
 
+    void set_review_mode(bool enabled)
+    {
+        review_mode = enabled;
+        if (enabled) {
+            {
+                std::lock_guard<std::mutex> lock(pending_review_mutex);
+                pending_review_frames.clear();
+                pending_review_bytes = 0;
+            }
+            {
+                std::lock_guard<std::mutex> lock(review_frame_mutex);
+                review_frames.clear();
+                review_queue_bytes = 0;
+            }
+        }
+        pending_review_condition.notify_all();
+        log_event(std::string("CONTROL review_mode=") + (enabled ? "true" : "false"));
+    }
+
     void review_encoder_loop()
     {
         while (true) {
@@ -340,22 +365,34 @@ struct NativeReceiver {
             {
                 std::unique_lock<std::mutex> lock(pending_review_mutex);
                 pending_review_condition.wait(lock, [this] {
-                    return stop_review_encoder || !pending_review_frames.empty();
+                    return stop_review_encoder ||
+                        (!review_mode && !pending_review_frames.empty());
                 });
                 if (stop_review_encoder) {
                     return;
+                }
+                if (review_mode) {
+                    continue;
                 }
                 frame = std::move(pending_review_frames.front());
                 pending_review_bytes -= frame.bgra.size();
                 pending_review_frames.pop_front();
             }
 
-            encode_review_frame(
-                frame.bgra.data(),
-                frame.width,
-                frame.height,
-                frame.stride,
-                frame.timestamp_ms);
+            if (!review_mode) {
+                try {
+                    encode_review_frame(
+                        frame.bgra.data(),
+                        frame.width,
+                        frame.height,
+                        frame.stride,
+                        frame.timestamp_ms);
+                } catch (const std::exception& exception) {
+                    set_error(std::string("Impact review encoder failed: ") + exception.what());
+                } catch (...) {
+                    set_error("Impact review encoder failed with an unknown error.");
+                }
+            }
         }
     }
 
@@ -474,6 +511,9 @@ struct NativeReceiver {
             set_error("Could not encode an impact review frame as JPEG.");
             return false;
         }
+        if (review_mode) {
+            return true;
+        }
 
         ReviewFrame frame;
         frame.jpeg = std::move(jpeg);
@@ -483,6 +523,9 @@ struct NativeReceiver {
         std::uint64_t dropped_frames = 0;
         {
             std::lock_guard<std::mutex> lock(review_frame_mutex);
+            if (review_mode) {
+                return true;
+            }
             frame.sequence = ++review_frame_sequence;
             review_queue_bytes += frame.jpeg.size();
             review_frames.push_back(std::move(frame));
@@ -529,6 +572,7 @@ struct NativeReceiver {
             pending_review_frames_dropped = 0;
             stop_review_encoder = false;
         }
+        review_mode = false;
         set_error({});
 
         if (!receiver.start(start_options, error)) {
@@ -621,6 +665,7 @@ struct NativeReceiver {
 
         log_event("DECODE decoder_started codec=H264");
         std::uint64_t packets_decoded = 0;
+        bool waiting_for_key_frame = false;
         auto last_connection_state = receiver.is_connected();
         log_event(std::string("CONNECTION state=") +
             (last_connection_state ? "connected" : "disconnected"));
@@ -651,9 +696,28 @@ struct NativeReceiver {
                     continue;
                 }
 
+                if (review_mode) {
+                    if (!waiting_for_key_frame) {
+                        avcodec_flush_buffers(codec_context);
+                        waiting_for_key_frame = true;
+                        log_event("DECODE paused_for_review");
+                    }
+                    while (receiver.try_pop(encoded)) {
+                    }
+                    continue;
+                }
+
                 if (encoded.data.empty() ||
                     encoded.data.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
                     continue;
+                }
+
+                if (waiting_for_key_frame) {
+                    if (!encoded.key_frame) {
+                        continue;
+                    }
+                    waiting_for_key_frame = false;
+                    log_event("DECODE resumed_at_key_frame");
                 }
 
                 ++packets_decoded;
@@ -687,7 +751,7 @@ struct NativeReceiver {
                     continue;
                 }
 
-                while (!stop_decoder) {
+                while (!stop_decoder && !review_mode) {
                     const int receive_result = avcodec_receive_frame(codec_context, decoded_frame);
                     if (receive_result == AVERROR(EAGAIN) || receive_result == AVERROR_EOF) {
                         break;
@@ -697,6 +761,11 @@ struct NativeReceiver {
                         av_strerror(receive_result, error, sizeof(error));
                         set_error(std::string("H.264 frame decode failed: ") + error);
                         break;
+                    }
+
+                    if (review_mode) {
+                        av_frame_unref(decoded_frame);
+                        continue;
                     }
 
                     const int frame_width = decoded_frame->width;
@@ -1068,6 +1137,16 @@ int optitrack_rtsp_dequeue_review_frame(
     std::memcpy(destination, frame.jpeg.data(), frame.jpeg.size());
     receiver->review_queue_bytes -= frame.jpeg.size();
     receiver->review_frames.pop_front();
+    return 1;
+}
+
+int optitrack_rtsp_set_review_mode(void* handle, int enabled)
+{
+    if (handle == nullptr) {
+        return 0;
+    }
+
+    static_cast<NativeReceiver*>(handle)->set_review_mode(enabled != 0);
     return 1;
 }
 

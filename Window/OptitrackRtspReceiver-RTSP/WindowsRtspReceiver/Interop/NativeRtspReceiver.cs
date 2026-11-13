@@ -214,6 +214,15 @@ internal sealed class NativeRtspReceiver : IDisposable
         }
     }
 
+    public bool SetReviewMode(bool enabled)
+    {
+        lock (_sync)
+        {
+            return _handle != IntPtr.Zero &&
+                NativeMethods.SetReviewMode(_handle, enabled ? 1 : 0) != 0;
+        }
+    }
+
     public void Dispose()
     {
         lock (_sync)
@@ -295,6 +304,9 @@ internal sealed class NativeRtspReceiver : IDisposable
             out ulong sequence,
             out long timestampMs,
             out int requiredBytes);
+
+        [DllImport(LibraryName, EntryPoint = "optitrack_rtsp_set_review_mode", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int SetReviewMode(IntPtr handle, int enabled);
 
         [DllImport(LibraryName, EntryPoint = "optitrack_rtsp_get_last_error", CallingConvention = CallingConvention.Cdecl)]
         internal static extern void GetLastError(IntPtr handle, StringBuilder error, int errorCapacity);
