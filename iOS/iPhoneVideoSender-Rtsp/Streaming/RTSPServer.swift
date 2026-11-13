@@ -1383,6 +1383,24 @@ final class RTSPServer: ObservableObject, @unchecked Sendable {
         compressionSessionRefcon = refcon
         let settings = currentSettings()
         VTSessionSetProperty(newSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
+        let frameReorderingStatus = VTSessionSetProperty(
+            newSession,
+            key: kVTCompressionPropertyKey_AllowFrameReordering,
+            value: kCFBooleanFalse
+        )
+        guard frameReorderingStatus == noErr else {
+            AppLogger.error(
+                "Could not disable H.264 frame reordering: \(frameReorderingStatus)",
+                category: "RTSP"
+            )
+            VTCompressionSessionInvalidate(newSession)
+            compressionSession = nil
+            if let refcon = compressionSessionRefcon {
+                Unmanaged<RTSPServer>.fromOpaque(refcon).release()
+                compressionSessionRefcon = nil
+            }
+            return false
+        }
         VTSessionSetProperty(
             newSession,
             key: kVTCompressionPropertyKey_AverageBitRate,
