@@ -165,6 +165,55 @@ internal sealed class NativeRtspReceiver : IDisposable
         }
     }
 
+    public bool TryDequeueReviewFrame(
+        out byte[] jpegBytes,
+        out int width,
+        out int height,
+        out ulong sequence,
+        out long timestampMs)
+    {
+        jpegBytes = [];
+        width = 0;
+        height = 0;
+        sequence = 0;
+        timestampMs = 0;
+
+        lock (_sync)
+        {
+            var result = NativeMethods.DequeueReviewFrame(
+                _handle,
+                null,
+                0,
+                out width,
+                out height,
+                out sequence,
+                out timestampMs,
+                out var requiredBytes);
+            if (result != 2 || requiredBytes <= 0 || requiredBytes > 256 * 1024 * 1024)
+            {
+                return false;
+            }
+
+            jpegBytes = new byte[requiredBytes];
+            result = NativeMethods.DequeueReviewFrame(
+                _handle,
+                jpegBytes,
+                jpegBytes.Length,
+                out width,
+                out height,
+                out sequence,
+                out timestampMs,
+                out requiredBytes);
+            if (result == 1 && requiredBytes == jpegBytes.Length)
+            {
+                return true;
+            }
+
+            jpegBytes = [];
+            return false;
+        }
+    }
+
     public void Dispose()
     {
         lock (_sync)
@@ -232,6 +281,17 @@ internal sealed class NativeRtspReceiver : IDisposable
             out int width,
             out int height,
             out int stride,
+            out ulong sequence,
+            out long timestampMs,
+            out int requiredBytes);
+
+        [DllImport(LibraryName, EntryPoint = "optitrack_rtsp_dequeue_review_frame", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int DequeueReviewFrame(
+            IntPtr handle,
+            [Out] byte[]? destination,
+            int destinationCapacity,
+            out int width,
+            out int height,
             out ulong sequence,
             out long timestampMs,
             out int requiredBytes);

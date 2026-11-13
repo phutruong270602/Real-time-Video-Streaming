@@ -59,6 +59,15 @@ OPTITRACK_RTSP_API int optitrack_rtsp_get_frame(
     uint64_t* sequence,
     int64_t* timestamp_ms,
     int* required_bytes);
+OPTITRACK_RTSP_API int optitrack_rtsp_dequeue_review_frame(
+    void* handle,
+    uint8_t* destination,
+    int destination_capacity,
+    int* width,
+    int* height,
+    uint64_t* sequence,
+    int64_t* timestamp_ms,
+    int* required_bytes);
 OPTITRACK_RTSP_API void optitrack_rtsp_get_last_error(
     void* handle,
     char* error,

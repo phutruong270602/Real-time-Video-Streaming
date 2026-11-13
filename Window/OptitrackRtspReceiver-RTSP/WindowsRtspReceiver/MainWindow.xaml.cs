@@ -21,7 +21,7 @@ namespace WindowsRtspReceiver;
 
 public partial class MainWindow : Window
 {
-    private const long MaximumImpactBufferBytes = 256L * 1024 * 1024;
+    private const long MaximumImpactBufferBytes = 1024L * 1024 * 1024;
     private static readonly TimeSpan ImpactPreRoll = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan ImpactPostRoll = TimeSpan.FromSeconds(1);
     private readonly ReceiverViewModel _viewModel = new();
@@ -33,10 +33,13 @@ public partial class MainWindow : Window
     private NativeRtspReceiver? _receiver;
     private CancellationTokenSource? _discoveryCancellation;
     private CancellationTokenSource? _bitrateDebounce;
+    private CancellationTokenSource? _impactFrameCaptureCancellation;
+    private Task? _impactFrameCaptureTask;
     private readonly DispatcherTimer _statisticsTimer;
     private readonly DispatcherTimer _videoTimer;
     private readonly DispatcherTimer _reviewPlaybackTimer;
     private readonly Stopwatch _reviewPlaybackClock = new();
+    private readonly object _impactFramesSync = new();
     private readonly Queue<RecordedFrame> _preImpactFrames = new();
     private readonly Stopwatch _renderClock = Stopwatch.StartNew();
     private readonly Stopwatch _sessionClock = new();
@@ -62,6 +65,8 @@ public partial class MainWindow : Window
     private long _lastPhoneStatsLogTimestamp;
     private int _renderFrames;
     private int _reviewFrameIndex;
+    private int _lastLoggedReviewFrameIndex = -1;
+    private ulong _lastDequeuedReviewSequence;
     private string _lastLoggedRtspError = string.Empty;
     private ResolutionOption? _appliedResolution;
     private string? _appliedCamera;
@@ -74,6 +79,7 @@ public partial class MainWindow : Window
     private bool _impactCaptureIncomplete;
     private bool _isReviewMode;
     private bool _isRtspRunning;
+    private bool _updatingReviewTimeline;
 
     public MainWindow()
     {
@@ -305,6 +311,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        await StopImpactFrameCaptureAsync();
         SetControls(isStarting: true, isRunning: false);
         _viewModel.ConnectionStatus = "Connecting...";
         _viewModel.Diagnostic = "Opening RTSP stream and waiting for video packets.";
@@ -372,6 +379,7 @@ public partial class MainWindow : Window
             SetControls(isStarting: false, isRunning: true);
             _statisticsTimer.Start();
             _videoTimer.Start();
+            StartImpactFrameCapture();
         }
         catch (DllNotFoundException exception)
         {
@@ -393,6 +401,7 @@ public partial class MainWindow : Window
     {
         ReceiverLog.Write("CONTROL", $"stop_requested mode={(IsWebRtcMode ? "WebRTC" : "RTSP")}");
         SetControls(isStarting: true, isRunning: true);
+        await StopImpactFrameCaptureAsync();
         ResetImpactCapture();
         _statisticsTimer.Stop();
         _videoTimer.Stop();
@@ -563,11 +572,6 @@ public partial class MainWindow : Window
         _renderFrames++;
 
         var now = _renderClock.ElapsedMilliseconds;
-        CaptureImpactFrame(now);
-        if (_impactCapturePending && now >= _impactCaptureDeadline)
-        {
-            FinishImpactCapture();
-        }
         UpdateImpactControls();
 
         if (now - _lastVideoRenderLogTimestamp >= 5000)
@@ -606,123 +610,186 @@ public partial class MainWindow : Window
             return;
         }
 
-        var now = _renderClock.ElapsedMilliseconds;
-        if (!IsImpactBufferReady(now))
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        int preRollFrameCount;
+        lock (_impactFramesSync)
         {
-            ImpactStatusText.Text = "Wait for 2 seconds of live video.";
-            return;
-        }
-
-        _reviewFrames = _preImpactFrames
-            .Where(frame => frame.TimestampMilliseconds >= now - (long)ImpactPreRoll.TotalMilliseconds)
-            .ToList();
-        _impactBufferBytes = _reviewFrames.Sum(frame => (long)frame.JpegBytes.Length);
-        _preImpactFrames.Clear();
-        _preImpactBufferBytes = 0;
-        _impactCaptureDeadline = now + (long)ImpactPostRoll.TotalMilliseconds;
-        _impactCaptureTruncated = _impactBufferBytes >= MaximumImpactBufferBytes;
-        _impactCaptureIncomplete = false;
-        _impactCapturePending = true;
-        ImpactStatusText.Text = "Impact recorded. Capturing 1 second after impact...";
-        ReceiverLog.Write(
-            "IMPACT",
-            $"capture_started pre_roll_frames={_reviewFrames.Count} pre_roll_ms={ImpactPreRoll.TotalMilliseconds:0} post_roll_ms={ImpactPostRoll.TotalMilliseconds:0}");
-        UpdateImpactControls();
-    }
-
-    private void CaptureImpactFrame(long timestampMilliseconds)
-    {
-        if (_bitmap is null || (_isReviewMode && !_impactCapturePending))
-        {
-            return;
-        }
-
-        if (_impactCapturePending && timestampMilliseconds > _impactCaptureDeadline)
-        {
-            return;
-        }
-
-        try
-        {
-            var frame = CreateRecordedFrame(_bitmap, timestampMilliseconds);
-            if (_impactCapturePending)
+            if (!IsImpactBufferReady(now))
             {
-                if (_impactBufferBytes + frame.JpegBytes.Length <= MaximumImpactBufferBytes)
-                {
-                    _reviewFrames.Add(frame);
-                    _impactBufferBytes += frame.JpegBytes.Length;
-                }
-                else
-                {
-                    _impactCaptureTruncated = true;
-                }
+                ImpactStatusText.Text = "Wait for 2 seconds of live video.";
                 return;
             }
 
-            _preImpactFrames.Enqueue(frame);
-            _preImpactBufferBytes += frame.JpegBytes.Length;
-            var oldestAllowedTimestamp = timestampMilliseconds -
-                (long)(ImpactPreRoll + TimeSpan.FromMilliseconds(500)).TotalMilliseconds;
-            while (_preImpactFrames.Count > 0 &&
-                   (_preImpactFrames.Peek().TimestampMilliseconds < oldestAllowedTimestamp ||
-                    _preImpactBufferBytes > MaximumImpactBufferBytes))
-            {
-                _preImpactBufferBytes -= _preImpactFrames.Dequeue().JpegBytes.Length;
-            }
+            _reviewFrames = _preImpactFrames
+                .Where(frame => frame.TimestampMilliseconds >= now - (long)ImpactPreRoll.TotalMilliseconds)
+                .ToList();
+            _impactBufferBytes = _reviewFrames.Sum(frame => (long)frame.JpegBytes.Length);
+            _preImpactFrames.Clear();
+            _preImpactBufferBytes = 0;
+            _impactCaptureDeadline = now + (long)ImpactPostRoll.TotalMilliseconds;
+            _impactCaptureTruncated = _impactBufferBytes >= MaximumImpactBufferBytes ||
+                _reviewFrames.Zip(_reviewFrames.Skip(1), (previous, current) =>
+                    current.Sequence != previous.Sequence + 1).Any(hasGap => hasGap);
+            _impactCaptureIncomplete = false;
+            _impactCapturePending = true;
+            preRollFrameCount = _reviewFrames.Count;
         }
-        catch (Exception exception) when (
-            exception is ArgumentException or IOException or InvalidOperationException or NotSupportedException)
-        {
-            _viewModel.LastError = $"Could not buffer an impact frame: {exception.Message}";
-            ReceiverLog.Write("ERROR", _viewModel.LastError);
-            if (_impactCapturePending)
-            {
-                _impactCaptureTruncated = true;
-            }
-        }
+        ImpactStatusText.Text = "Impact recorded. Capturing 1 second after impact...";
+        ReceiverLog.Write(
+            "IMPACT",
+            $"capture_started pre_roll_frames={preRollFrameCount} pre_roll_ms={ImpactPreRoll.TotalMilliseconds:0} post_roll_ms={ImpactPostRoll.TotalMilliseconds:0}");
+        UpdateImpactControls();
     }
 
-    private static RecordedFrame CreateRecordedFrame(WriteableBitmap bitmap, long timestampMilliseconds)
+    private void StartImpactFrameCapture()
     {
-        var width = bitmap.PixelWidth;
-        var height = bitmap.PixelHeight;
-        var pixels = new byte[checked(width * height * 4)];
-        bitmap.CopyPixels(pixels, checked(width * 4), 0);
+        _impactFrameCaptureCancellation?.Cancel();
+        _impactFrameCaptureCancellation?.Dispose();
+        _impactFrameCaptureCancellation = new CancellationTokenSource();
+        _lastDequeuedReviewSequence = 0;
+        var cancellationToken = _impactFrameCaptureCancellation.Token;
+        _impactFrameCaptureTask = Task.Run(() => ImpactFrameCaptureLoopAsync(cancellationToken));
+    }
 
-        var source = BitmapSource.Create(
-            width,
-            height,
-            96,
-            96,
-            PixelFormats.Bgra32,
-            null,
-            pixels,
-            checked(width * 4));
-        source.Freeze();
-        var encoder = new JpegBitmapEncoder { QualityLevel = 90 };
-        encoder.Frames.Add(BitmapFrame.Create(source));
-        using var stream = new MemoryStream();
-        encoder.Save(stream);
-        return new RecordedFrame(stream.ToArray(), width, height, timestampMilliseconds);
+    private async Task StopImpactFrameCaptureAsync()
+    {
+        _impactFrameCaptureCancellation?.Cancel();
+        if (_impactFrameCaptureTask is not null)
+        {
+            try
+            {
+                await _impactFrameCaptureTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        _impactFrameCaptureCancellation?.Dispose();
+        _impactFrameCaptureCancellation = null;
+        _impactFrameCaptureTask = null;
+    }
+
+    private async Task ImpactFrameCaptureLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (_receiver is not null &&
+                _receiver.TryDequeueReviewFrame(
+                    out var jpegBytes,
+                    out var width,
+                    out var height,
+                    out var sequence,
+                    out var timestampMilliseconds))
+            {
+                var now = timestampMilliseconds;
+                var frame = new RecordedFrame(jpegBytes, width, height, sequence, timestampMilliseconds);
+                var finishCapture = false;
+                var missingFrames = _lastDequeuedReviewSequence != 0 &&
+                    sequence > _lastDequeuedReviewSequence + 1
+                        ? sequence - _lastDequeuedReviewSequence - 1
+                        : 0;
+                _lastDequeuedReviewSequence = sequence;
+                lock (_impactFramesSync)
+                {
+                    if (missingFrames > 0 && _impactCapturePending)
+                    {
+                        _impactCaptureTruncated = true;
+                    }
+
+                    if (!_isRtspRunning)
+                    {
+                        continue;
+                    }
+                    else if (_impactCapturePending)
+                    {
+                        if (now <= _impactCaptureDeadline &&
+                            _impactBufferBytes + frame.JpegBytes.Length <= MaximumImpactBufferBytes)
+                        {
+                            _reviewFrames.Add(frame);
+                            _impactBufferBytes += frame.JpegBytes.Length;
+                        }
+                        else if (_impactBufferBytes + frame.JpegBytes.Length > MaximumImpactBufferBytes)
+                        {
+                            _impactCaptureTruncated = true;
+                        }
+
+                        if (missingFrames > 0)
+                        {
+                            ReceiverLog.Write(
+                                "IMPACT",
+                                $"review_frame_gap missing={missingFrames} previous_sequence={sequence - missingFrames - 1} current_sequence={sequence}");
+                        }
+
+                        if (now >= _impactCaptureDeadline)
+                        {
+                            _impactCapturePending = false;
+                            finishCapture = true;
+                        }
+                    }
+                    else
+                    {
+                        _preImpactFrames.Enqueue(frame);
+                        _preImpactBufferBytes += frame.JpegBytes.Length;
+                        var oldestAllowedTimestamp = now -
+                            (long)(ImpactPreRoll + TimeSpan.FromMilliseconds(500)).TotalMilliseconds;
+                        while (_preImpactFrames.Count > 0 &&
+                               (_preImpactFrames.Peek().TimestampMilliseconds < oldestAllowedTimestamp ||
+                                _preImpactBufferBytes > MaximumImpactBufferBytes))
+                        {
+                            _preImpactBufferBytes -= _preImpactFrames.Dequeue().JpegBytes.Length;
+                        }
+                    }
+                }
+
+                if (finishCapture)
+                {
+                    await Dispatcher.InvokeAsync(FinishImpactCapture);
+                }
+                continue;
+            }
+
+            var currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var finishAfterStreamPause = false;
+            lock (_impactFramesSync)
+            {
+                if (_impactCapturePending && currentTime >= _impactCaptureDeadline)
+                {
+                    _impactCapturePending = false;
+                    finishAfterStreamPause = true;
+                }
+            }
+            if (finishAfterStreamPause)
+            {
+                await Dispatcher.InvokeAsync(FinishImpactCapture);
+            }
+            await Task.Delay(1, cancellationToken);
+        }
     }
 
     private bool IsImpactBufferReady(long now)
     {
-        if (_preImpactFrames.Count == 0)
+        lock (_impactFramesSync)
         {
-            return false;
-        }
+            if (_preImpactFrames.Count == 0)
+            {
+                return false;
+            }
 
-        var latest = _preImpactFrames.Last();
-        return now - _preImpactFrames.Peek().TimestampMilliseconds >= ImpactPreRoll.TotalMilliseconds &&
-            now - latest.TimestampMilliseconds <= 500;
+            var latest = _preImpactFrames.Last();
+            return now - _preImpactFrames.Peek().TimestampMilliseconds >= ImpactPreRoll.TotalMilliseconds &&
+                now - latest.TimestampMilliseconds <= 500;
+        }
     }
 
     private void FinishImpactCapture()
     {
-        _impactCapturePending = false;
-        _impactCaptureIncomplete = !_reviewFrames.Any(frame =>
-            frame.TimestampMilliseconds >= _impactCaptureDeadline - 100);
+        lock (_impactFramesSync)
+        {
+            _impactCapturePending = false;
+            _impactCaptureIncomplete = !_reviewFrames.Any(frame =>
+                frame.TimestampMilliseconds >= _impactCaptureDeadline - 100);
+        }
         if (_reviewFrames.Count == 0)
         {
             _viewModel.LastError = "No video frames were available to review for this impact.";
@@ -733,6 +800,7 @@ public partial class MainWindow : Window
 
         _isReviewMode = true;
         _reviewFrameIndex = 0;
+        _lastLoggedReviewFrameIndex = -1;
         ShowReviewFrame();
         ImpactStatusText.Text = _impactCaptureIncomplete
             ? $"Review ready ({_reviewFrames.Count} frames); the stream ended before the full 1-second post-roll."
@@ -752,6 +820,7 @@ public partial class MainWindow : Window
         _isReviewMode = false;
         _reviewFrames.Clear();
         _impactBufferBytes = 0;
+        _lastLoggedReviewFrameIndex = -1;
         VideoImage.Source = _bitmap;
         if (_bitmap is null)
         {
@@ -806,6 +875,23 @@ public partial class MainWindow : Window
         _reviewPlaybackTimer.Start();
     }
 
+    private void ReviewTimelineSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_updatingReviewTimeline || !_isReviewMode || _reviewFrames.Count == 0)
+        {
+            return;
+        }
+
+        StopReviewPlayback();
+        _reviewFrameIndex = Math.Clamp(
+            (int)Math.Round(ReviewTimelineSlider.Value),
+            0,
+            _reviewFrames.Count - 1);
+        ShowReviewFrame();
+    }
+
     private void ReviewPlaybackTimer_Tick(object? sender, EventArgs e)
     {
         var targetTimestamp = _reviewPlaybackStartTimestamp + _reviewPlaybackClock.ElapsedMilliseconds;
@@ -847,6 +933,25 @@ public partial class MainWindow : Window
         VideoImage.Source = image;
         VideoPlaceholder.Visibility = Visibility.Collapsed;
         ReviewFrameText.Text = $"Frame {_reviewFrameIndex + 1} / {_reviewFrames.Count}  ({frame.Width} x {frame.Height})";
+        _updatingReviewTimeline = true;
+        try
+        {
+            ReviewTimelineSlider.Maximum = Math.Max(0, _reviewFrames.Count - 1);
+            ReviewTimelineSlider.Value = _reviewFrameIndex;
+        }
+        finally
+        {
+            _updatingReviewTimeline = false;
+        }
+        if (_lastLoggedReviewFrameIndex != _reviewFrameIndex)
+        {
+            var offsetMilliseconds = frame.TimestampMilliseconds -
+                _reviewFrames[0].TimestampMilliseconds;
+            ReceiverLog.Write(
+                "IMPACT_REVIEW",
+                $"frame={_reviewFrameIndex + 1}/{_reviewFrames.Count} source_sequence={frame.Sequence} offset_ms={offsetMilliseconds} timestamp_ms={frame.TimestampMilliseconds} resolution={frame.Width}x{frame.Height} playback={_reviewPlaybackTimer.IsEnabled}");
+            _lastLoggedReviewFrameIndex = _reviewFrameIndex;
+        }
         UpdateImpactControls();
     }
 
@@ -855,15 +960,19 @@ public partial class MainWindow : Window
         _reviewPlaybackTimer.Stop();
         _reviewPlaybackClock.Stop();
         _reviewPlaybackStartTimestamp = 0;
-        _impactCapturePending = false;
-        _impactCaptureTruncated = false;
-        _impactCaptureIncomplete = false;
         _isReviewMode = false;
-        _reviewFrames.Clear();
-        _preImpactFrames.Clear();
-        _preImpactBufferBytes = 0;
-        _impactBufferBytes = 0;
         _reviewFrameIndex = 0;
+        _lastLoggedReviewFrameIndex = -1;
+        lock (_impactFramesSync)
+        {
+            _impactCapturePending = false;
+            _impactCaptureTruncated = false;
+            _impactCaptureIncomplete = false;
+            _reviewFrames.Clear();
+            _preImpactFrames.Clear();
+            _preImpactBufferBytes = 0;
+            _impactBufferBytes = 0;
+        }
         if (PlayReviewButton is not null)
         {
             PlayReviewButton.Content = "Play";
@@ -887,28 +996,35 @@ public partial class MainWindow : Window
             return;
         }
 
+        var bufferReady = IsImpactBufferReady(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        double bufferedSeconds;
+        lock (_impactFramesSync)
+        {
+            bufferedSeconds = _preImpactFrames.Count == 0
+                ? 0
+                : Math.Min(
+                    ImpactPreRoll.TotalSeconds,
+                    (_preImpactFrames.Last().TimestampMilliseconds -
+                     _preImpactFrames.Peek().TimestampMilliseconds) / 1000.0);
+        }
+
         ImpactButton.IsEnabled = _isRtspRunning &&
             !_impactCapturePending &&
             !_isReviewMode &&
-            IsImpactBufferReady(_renderClock.ElapsedMilliseconds);
+            bufferReady;
         ImpactButton.Content = _impactCapturePending ? "Recording..." : "Impact (I)";
         ReviewControlsPanel.Visibility = _isReviewMode ? Visibility.Visible : Visibility.Collapsed;
         PreviousFrameButton.IsEnabled = _isReviewMode && _reviewFrameIndex > 0;
         NextFrameButton.IsEnabled = _isReviewMode && _reviewFrameIndex < _reviewFrames.Count - 1;
         PlayReviewButton.IsEnabled = _isReviewMode && _reviewFrames.Count > 1;
+        ReviewTimelineSlider.IsEnabled = _isReviewMode && _reviewFrames.Count > 1;
         if (_impactCapturePending)
         {
             ImpactStatusText.Text = "Impact recorded. Capturing 1 second after impact...";
         }
         else if (!_isReviewMode && _isRtspRunning)
         {
-            var bufferedSeconds = _preImpactFrames.Count == 0
-                ? 0
-                : Math.Min(
-                    ImpactPreRoll.TotalSeconds,
-                    (_preImpactFrames.Last().TimestampMilliseconds -
-                     _preImpactFrames.Peek().TimestampMilliseconds) / 1000.0);
-            ImpactStatusText.Text = IsImpactBufferReady(_renderClock.ElapsedMilliseconds)
+            ImpactStatusText.Text = bufferReady
                 ? "Live view. Press Impact or I to save the previous 2 s and next 1 s."
                 : $"Buffering live video: {bufferedSeconds:0.0} / 2.0 s";
         }
@@ -918,7 +1034,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private sealed record RecordedFrame(byte[] JpegBytes, int Width, int Height, long TimestampMilliseconds);
+    private sealed record RecordedFrame(
+        byte[] JpegBytes,
+        int Width,
+        int Height,
+        ulong Sequence,
+        long TimestampMilliseconds);
 
     private async Task InitializeWebRtcViewAsync()
     {
@@ -1715,7 +1836,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         ReceiverLog.Write("APP", "window_closing");
         _discoveryCancellation?.Cancel();
@@ -1727,6 +1848,7 @@ public partial class MainWindow : Window
         WebRtcVideoView.CoreWebView2?.PostWebMessageAsJson("""{"type":"STOP"}""");
         _bitrateDebounce?.Cancel();
         _bitrateDebounce?.Dispose();
+        _impactFrameCaptureCancellation?.Cancel();
         _reviewPlaybackTimer.Stop();
         _receiver?.Dispose();
         ReceiverLog.Write("APP", "window_closed");

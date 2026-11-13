@@ -15,6 +15,7 @@ extern "C" {
 #include <cstdio>
 #include <ctime>
 #include <cstring>
+#include <deque>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -44,6 +45,17 @@ extern "C" {
 #endif
 
 namespace {
+
+constexpr std::size_t maximum_review_queue_bytes = 1024ULL * 1024 * 1024;
+constexpr int review_jpeg_quantizer = 8;
+
+struct ReviewFrame {
+    std::vector<std::uint8_t> jpeg;
+    int width = 0;
+    int height = 0;
+    std::uint64_t sequence = 0;
+    std::int64_t timestamp_ms = 0;
+};
 
 void log_event(const std::string& event) noexcept
 {
@@ -186,9 +198,20 @@ struct NativeReceiver {
     optitrack::rtsp::ReceiverOptions start_options;
     std::mutex lifecycle_mutex;
     std::mutex frame_mutex;
+    std::mutex review_frame_mutex;
     std::mutex error_mutex;
     std::thread decoder_thread;
     std::vector<std::uint8_t> latest_frame;
+    std::deque<ReviewFrame> review_frames;
+    std::size_t review_queue_bytes = 0;
+    std::uint64_t review_frame_sequence = 0;
+    std::uint64_t review_frames_dropped = 0;
+    const AVCodec* review_encoder = nullptr;
+    AVCodecContext* review_encoder_context = nullptr;
+    AVFrame* review_encoder_frame = nullptr;
+    SwsContext* review_conversion = nullptr;
+    int review_encoder_width = 0;
+    int review_encoder_height = 0;
     std::string last_error;
     int width = 0;
     int height = 0;
@@ -233,6 +256,154 @@ struct NativeReceiver {
         if (decoder_thread.joinable()) {
             decoder_thread.join();
         }
+        {
+            std::lock_guard<std::mutex> lock(review_frame_mutex);
+            review_frames.clear();
+            review_queue_bytes = 0;
+        }
+        reset_review_encoder();
+    }
+
+    void reset_review_encoder()
+    {
+        sws_freeContext(review_conversion);
+        review_conversion = nullptr;
+        av_frame_free(&review_encoder_frame);
+        avcodec_free_context(&review_encoder_context);
+        review_encoder = nullptr;
+        review_encoder_width = 0;
+        review_encoder_height = 0;
+    }
+
+    bool encode_review_frame(
+        const std::uint8_t* bgra,
+        int frame_width,
+        int frame_height,
+        int frame_stride,
+        std::int64_t timestamp)
+    {
+        if (review_encoder_context == nullptr ||
+            review_encoder_width != frame_width ||
+            review_encoder_height != frame_height) {
+            reset_review_encoder();
+            review_encoder = avcodec_find_encoder(AV_CODEC_ID_MJPEG);
+            if (review_encoder == nullptr) {
+                set_error("FFmpeg MJPEG encoder is unavailable for impact review.");
+                return false;
+            }
+
+            review_encoder_context = avcodec_alloc_context3(review_encoder);
+            review_encoder_frame = av_frame_alloc();
+            if (review_encoder_context == nullptr || review_encoder_frame == nullptr) {
+                reset_review_encoder();
+                set_error("Could not allocate the impact review encoder.");
+                return false;
+            }
+            review_encoder_context->width = frame_width;
+            review_encoder_context->height = frame_height;
+            review_encoder_context->pix_fmt = AV_PIX_FMT_YUVJ420P;
+            review_encoder_context->time_base = AVRational{1, 120};
+            review_encoder_context->framerate = AVRational{120, 1};
+            review_encoder_context->color_range = AVCOL_RANGE_JPEG;
+            review_encoder_context->flags |= AV_CODEC_FLAG_QSCALE;
+            review_encoder_context->global_quality = review_jpeg_quantizer * FF_QP2LAMBDA;
+            if (avcodec_open2(review_encoder_context, review_encoder, nullptr) < 0) {
+                reset_review_encoder();
+                set_error("Could not initialize the impact review JPEG encoder.");
+                return false;
+            }
+
+            review_encoder_frame->format = review_encoder_context->pix_fmt;
+            review_encoder_frame->width = frame_width;
+            review_encoder_frame->height = frame_height;
+            review_encoder_frame->color_range = AVCOL_RANGE_JPEG;
+            review_encoder_frame->quality = review_jpeg_quantizer * FF_QP2LAMBDA;
+            if (av_frame_get_buffer(review_encoder_frame, 32) < 0) {
+                reset_review_encoder();
+                set_error("Could not allocate impact review frame storage.");
+                return false;
+            }
+
+            review_encoder_width = frame_width;
+            review_encoder_height = frame_height;
+        }
+
+        review_conversion = sws_getCachedContext(
+            review_conversion,
+            frame_width,
+            frame_height,
+            AV_PIX_FMT_BGRA,
+            frame_width,
+            frame_height,
+            review_encoder_context->pix_fmt,
+            SWS_FAST_BILINEAR,
+            nullptr,
+            nullptr,
+            nullptr);
+        if (review_conversion == nullptr || av_frame_make_writable(review_encoder_frame) < 0) {
+            set_error("Could not prepare an impact review frame.");
+            return false;
+        }
+
+        const std::uint8_t* source_data[4]{bgra, nullptr, nullptr, nullptr};
+        const int source_linesize[4]{frame_stride, 0, 0, 0};
+        if (sws_scale(
+                review_conversion,
+                source_data,
+                source_linesize,
+                0,
+                frame_height,
+                review_encoder_frame->data,
+                review_encoder_frame->linesize) != frame_height) {
+            set_error("Could not convert a frame for impact review.");
+            return false;
+        }
+
+        review_encoder_frame->pts = static_cast<std::int64_t>(review_frame_sequence);
+        AVPacket* packet = av_packet_alloc();
+        if (packet == nullptr) {
+            set_error("Could not allocate an impact review packet.");
+            return false;
+        }
+
+        std::vector<std::uint8_t> jpeg;
+        int result = avcodec_send_frame(review_encoder_context, review_encoder_frame);
+        if (result >= 0) {
+            result = avcodec_receive_packet(review_encoder_context, packet);
+        }
+        if (result >= 0 && packet->size > 0) {
+            jpeg.assign(packet->data, packet->data + packet->size);
+        }
+        av_packet_free(&packet);
+        if (result < 0 || jpeg.empty()) {
+            set_error("Could not encode an impact review frame as JPEG.");
+            return false;
+        }
+
+        ReviewFrame frame;
+        frame.jpeg = std::move(jpeg);
+        frame.width = frame_width;
+        frame.height = frame_height;
+        frame.timestamp_ms = timestamp;
+        std::uint64_t dropped_frames = 0;
+        {
+            std::lock_guard<std::mutex> lock(review_frame_mutex);
+            frame.sequence = ++review_frame_sequence;
+            review_queue_bytes += frame.jpeg.size();
+            review_frames.push_back(std::move(frame));
+            while (review_queue_bytes > maximum_review_queue_bytes && !review_frames.empty()) {
+                review_queue_bytes -= review_frames.front().jpeg.size();
+                review_frames.pop_front();
+                ++review_frames_dropped;
+                ++dropped_frames;
+            }
+        }
+        if (dropped_frames != 0) {
+            log_event("REVIEW_QUEUE dropped_frames=" + std::to_string(dropped_frames) +
+                " total_dropped=" + std::to_string(review_frames_dropped) +
+                " reason=1_GiB_queue_limit");
+        }
+        return true;
     }
 
     bool start(std::string& error)
@@ -248,6 +419,13 @@ struct NativeReceiver {
             frame_sequence = 0;
             timestamp_ms = 0;
             frames_decoded = 0;
+        }
+        {
+            std::lock_guard<std::mutex> review_lock(review_frame_mutex);
+            review_frames.clear();
+            review_queue_bytes = 0;
+            review_frame_sequence = 0;
+            review_frames_dropped = 0;
         }
         set_error({});
 
@@ -477,6 +655,12 @@ struct NativeReceiver {
                                 ')';
                         }
                         pixel_sample += ']';
+                        const bool review_frame_encoded = encode_review_frame(
+                            bgra.data(),
+                            frame_width,
+                            frame_height,
+                            frame_stride,
+                            encoded.timestamp_ms);
                         {
                             std::lock_guard<std::mutex> lock(frame_mutex);
                             latest_frame = std::move(bgra);
@@ -512,7 +696,9 @@ struct NativeReceiver {
                                 " timestamp_ms=" + std::to_string(encoded.timestamp_ms) +
                                 " input_bytes=" + std::to_string(encoded.data.size()));
                         }
-                        set_error({});
+                        if (review_frame_encoded) {
+                            set_error({});
+                        }
                     } else {
                         set_error("FFmpeg could not convert a decoded video frame to BGRA.");
                     }
@@ -731,6 +917,46 @@ int optitrack_rtsp_get_frame(
     }
 
     std::memcpy(destination, receiver->latest_frame.data(), receiver->latest_frame.size());
+    return 1;
+}
+
+int optitrack_rtsp_dequeue_review_frame(
+    void* handle,
+    uint8_t* destination,
+    int destination_capacity,
+    int* width,
+    int* height,
+    uint64_t* sequence,
+    int64_t* timestamp_ms,
+    int* required_bytes)
+{
+    if (handle == nullptr || width == nullptr || height == nullptr ||
+        sequence == nullptr || timestamp_ms == nullptr || required_bytes == nullptr) {
+        return 0;
+    }
+
+    auto* receiver = static_cast<NativeReceiver*>(handle);
+    std::lock_guard<std::mutex> lock(receiver->review_frame_mutex);
+    if (receiver->review_frames.empty()) {
+        return 0;
+    }
+
+    const auto& frame = receiver->review_frames.front();
+    if (frame.jpeg.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return 0;
+    }
+    *width = frame.width;
+    *height = frame.height;
+    *sequence = frame.sequence;
+    *timestamp_ms = frame.timestamp_ms;
+    *required_bytes = static_cast<int>(frame.jpeg.size());
+    if (destination == nullptr || destination_capacity < *required_bytes) {
+        return 2;
+    }
+
+    std::memcpy(destination, frame.jpeg.data(), frame.jpeg.size());
+    receiver->review_queue_bytes -= frame.jpeg.size();
+    receiver->review_frames.pop_front();
     return 1;
 }
 

@@ -68,8 +68,12 @@ The project has a default SDK path; if your SDK is elsewhere, provide its path
 with the `FFmpegRoot` MSBuild property as shown below.
 During RTSP playback, use **Impact** or press **I** to capture the previous two
 seconds and the following one second. The client then opens an in-memory review
-with Play/Pause, previous/next frame, and New (return to live view) controls.
-Review frames are buffered as JPEG at quality 90, with a 256 MiB memory limit.
+with Play/Pause, a seek slider, previous/next frame, and New (return to live
+view) controls.
+The native receiver queues each decoded frame for review independently of the
+live display timer, and encodes review frames as JPEG with an FFmpeg MJPEG
+quantizer of 8. Review buffering is limited to 1 GiB; the native receiver logs
+any queue overflow.
 
 The application always appends startup, control, configuration, and sampled
 statistics to `log/receiver_ui.log`. Native RTSP sessions additionally append
